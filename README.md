@@ -11,10 +11,12 @@ Formats: VST3, LV2 and Standalone on Linux/Windows/macOS, plus AU on macOS. Made
 | 1. Skeleton and engine evaluation | done: see [docs/engine-evaluation.md](docs/engine-evaluation.md) |
 | 2. Core DSP | done |
 | 3. Quality features (modes, formants, transients, tight) | next |
-| 4. UI and presets | |
+| 4. UI and presets | UI done (moved ahead of 3 for testing); presets and tuner to come |
 | 5. Hardening (pluginval, hosts, profiling) | |
 
-The plugin shifts pitch with the Live engine (1024 samples, 21.3 ms of latency at 48 kHz). Working controls: Playing in, Hear, Shift, Fine, Mix, Output and Bypass. Mode, Formant and Tight exist as parameters but do nothing until milestone 3. The editor is JUCE's generic one until milestone 4.
+The plugin shifts pitch with the Live engine (1024 samples, 21.3 ms of latency at 48 kHz). Working controls: Playing in, Hear, Shift, Fine, Mix, Output and Bypass. Mode, Formant and Tight exist as parameters but do nothing until milestone 3; the editor shows them as "coming soon".
+
+The editor (src/ui) has the Lithium family look (Lithium Drums' colors, fonts and knob). Its "You hear" card includes a visualizer: input and output spectra with the open strings of the tuning you hear marked, and the shift actually measured between input and output (it compares the two spectra on a log-frequency axis, so it works on chords), with how many cents it is from what the controls ask for.
 
 ## Building
 
@@ -26,7 +28,21 @@ cmake --build build/release
 ctest --test-dir build/release --output-on-failure
 ```
 
-Plugins end up in `build/release/src/plugin/LithiumLowChug_artefacts/Release/`. Add `-DLOWCHUG_COPY_PLUGINS=ON` to also copy them into your user plugin folders.
+Plugins end up in `build/release/src/plugin/LithiumLowChug_artefacts/Release/`. Add `-DLOWCHUG_COPY_PLUGINS=ON` to also copy them into your user plugin folders (on Linux `~/.vst3/Lithium LowChug.vst3` and `~/.lv2/Lithium LowChug.lv2`).
+
+The Standalone app is `build/release/src/plugin/LithiumLowChug_artefacts/Release/Standalone/Lithium LowChug`. It takes a mono input (choose your guitar's input under Options > Audio/MIDI Settings) and plays the result on both outputs.
+
+To see the editor without a host, the plugin tests can save PNG snapshots of it:
+
+```bash
+LOWCHUG_SNAPSHOT_DIR=/tmp ./build/release/tests/lowchug-plugin-tests
+```
+
+[pluginval](https://github.com/Tracktion/pluginval) passes at strictness 5 for the VST3 and LV2:
+
+```bash
+pluginval --strictness-level 5 --validate "$HOME/.vst3/Lithium LowChug.vst3"
+```
 
 | Option | Default | Builds |
 |---|---|---|
@@ -49,8 +65,9 @@ src/dsp/            plugin-independent DSP (plain C++, no JUCE)
   PitchShiftEngine.h    the swappable engine interface
   EngineConfigs.h       the Live and Studio engine settings
   engines/              PhaseVocoderEngine (chosen), SignalsmithEngine, GranularEngine (reference)
-src/plugin/         JUCE wrapper: processor, parameters, tuning model
-src/ui/             (milestone 4)
+src/plugin/         JUCE wrapper: processor, parameters, tuning model, analysis tap, standalone audio setup
+src/ui/             the editor: Lithium look and feel, panels, tuning sync (TuningController), shift analyzer
+assets/fonts/       Barlow, Barlow Condensed, IBM Plex Mono (compiled into the plugin)
 tools/engine-eval/  engine A/B harness: synthetic DI corpus, metrics, WAV renders
 tests/              DSP tests (no JUCE) and plugin tests (JUCE UnitTest)
 docs/               engine evaluation report
@@ -79,7 +96,8 @@ Everything is set in `cmake/PluginIdentity.cmake`. **Don't change the codes afte
 - **Per-string retuning.** Turning standard into Drop D by lowering only the low E needs polyphonic source separation before the shifter: one engine per separated string. That is a research project of its own; the hook point is noted in `src/dsp/PitchShiftEngine.h`.
 - MIDI control beyond host automation.
 
-## Licences
+## Licenses
 
-- JUCE 8+ is dual-licensed: AGPLv3, or a commercial JUCE licence. Distributing LowChug binaries requires one or the other.
+- JUCE 8+ is dual-licensed: AGPLv3, or a commercial JUCE license. Distributing LowChug binaries requires one or the other.
 - Signalsmith Stretch and Signalsmith Linear are MIT licensed.
+- Barlow, Barlow Condensed and IBM Plex Mono are under the SIL Open Font License (assets/fonts/OFL-*.txt).

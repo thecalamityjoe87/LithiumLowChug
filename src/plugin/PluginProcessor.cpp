@@ -1,7 +1,9 @@
 #include "PluginProcessor.h"
 
 #include "Parameters.h"
+#include "StandaloneAudio.h"
 #include "Tunings.h"
+#include "ui/PluginEditor.h"
 
 namespace lowchug
 {
@@ -10,9 +12,19 @@ namespace lowchug
 // to be a (static) member to be allowed to use it.
 juce::AudioProcessor::BusesProperties LowChugProcessor::makeBuses()
 {
-    // Default to stereo; isBusesLayoutSupported() also allows mono.
+    // In the standalone app a guitar arrives on ONE input of the audio
+    // interface. With a stereo input the other (empty) input would make the
+    // shifted guitar play in one ear only, so the standalone takes a mono
+    // input (choose which interface input in Audio/MIDI Settings) and sends
+    // the result to both outputs. JUCE records which wrapper is creating us
+    // before the constructor runs, so this check is valid here.
+    //
+    // In a DAW, default to stereo; isBusesLayoutSupported() still accepts
+    // mono tracks (mono in, stereo out).
+    const bool isStandalone = juce::PluginHostType::getPluginLoadedAs() == wrapperType_Standalone;
+
     return BusesProperties()
-        .withInput ("Input", juce::AudioChannelSet::stereo(), true)
+        .withInput ("Input", isStandalone ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo(), true)
         .withOutput ("Output", juce::AudioChannelSet::stereo(), true);
 }
 
@@ -28,6 +40,9 @@ LowChugProcessor::LowChugProcessor()
     mixValue = state.getRawParameterValue (params::mix);
     outputValue = state.getRawParameterValue (params::output);
     bypassValue = state.getRawParameterValue (params::bypass);
+
+    // Standalone app only: audio device fixes and an unmuted guitar input.
+    setUpStandaloneAudio();
 }
 
 bool LowChugProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -63,15 +78,19 @@ void LowChugProcessor::reset()
     detuner.reset();
 }
 
-float LowChugProcessor::getEffectiveShift() const
+int LowChugProcessor::getShiftSemitones() const
 {
     const auto source = static_cast<tunings::Source> (juce::roundToInt (sourceValue->load()));
     const int target = juce::roundToInt (targetValue->load());
 
     // A named target ("Hear: Drop C") decides the shift; "Custom" (on either
     // side) hands control to the manual shift parameter.
-    const int semitones = tunings::shiftFor (source, target).value_or (juce::roundToInt (shiftValue->load()));
-    return (float) semitones + fineValue->load() / 100.0f;
+    return tunings::shiftFor (source, target).value_or (juce::roundToInt (shiftValue->load()));
+}
+
+float LowChugProcessor::getEffectiveShift() const
+{
+    return (float) getShiftSemitones() + fineValue->load() / 100.0f;
 }
 
 void LowChugProcessor::pushParametersToDsp (bool forceBypass)
@@ -96,9 +115,19 @@ void LowChugProcessor::process (juce::AudioBuffer<float>& buffer, bool forceBypa
     const int numOut = getTotalNumOutputChannels();
     const int numSamples = buffer.getNumSamples();
 
+    const int numProcessed = std::min (numIn, buffer.getNumChannels());
+
+    // While the editor is open, copy what comes in and what goes out for its
+    // visualizer. Lock-free and allocation-free (see AnalysisTap); a no-op
+    // when no editor is open.
+    auto tapBlock = analysisTap.beginBlock (numSamples);
+    tapBlock.addInput (buffer.getArrayOfReadPointers(), numProcessed);
+
     // Process the input channels in place. (Identical stereo channels are
     // detected inside the detuner and shifted only once.)
-    detuner.process (buffer.getArrayOfWritePointers(), std::min (numIn, buffer.getNumChannels()), numSamples);
+    detuner.process (buffer.getArrayOfWritePointers(), numProcessed, numSamples);
+
+    tapBlock.addOutput (buffer.getArrayOfReadPointers(), numProcessed);
 
     // Mono in, stereo out: copy the result to the second channel.
     int filledChannels = numIn;
@@ -132,13 +161,15 @@ juce::AudioProcessorParameter* LowChugProcessor::getBypassParameter() const
 
 juce::AudioProcessorEditor* LowChugProcessor::createEditor()
 {
-    // A temporary auto-generated editor; the real LowChug UI is milestone 4.
-    return new juce::GenericAudioProcessorEditor (*this);
+    // Called by the host on the message thread whenever it opens our window.
+    // The host owns the editor and deletes it when the window closes; the
+    // processor (and all parameter values) lives on regardless.
+    return new LowChugEditor (*this);
 }
 
 void LowChugProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // The APVTS keeps every parameter in a ValueTree; serialise it as XML.
+    // The APVTS keeps every parameter in a ValueTree; serialize it as XML.
     // copyState() is safe to call while the audio thread is running.
     if (const auto xml = state.copyState().createXml())
         copyXmlToBinary (*xml, destData);

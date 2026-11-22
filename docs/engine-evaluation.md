@@ -18,7 +18,7 @@ Our engine has one weakness that Signalsmith doesn't. A pick attack is followed 
 | **PhaseVocoder** (symmetric) | Our engine (`src/dsp/engines/PhaseVocoderEngine.cpp`). Laroche–Dolson peak-region shifting with identity phase locking, fractional-bin placement, phase-derived frequencies, and transient phase reset. Symmetric Hann windows, so latency equals the window length. |
 | **PV-lowdelay** | The same engine with an asymmetric window pair. A long analysis window gives the frequency resolution; a short synthesis window sets the latency. Written `analysis:synthesis`. |
 
-Rubber Band was excluded (GPL/commercial licence), as the brief asked.
+Rubber Band was excluded (GPL/commercial license), as the brief asked.
 
 ## Method
 

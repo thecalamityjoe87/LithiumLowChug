@@ -6,6 +6,9 @@
 #include "plugin/Parameters.h"
 #include "plugin/PluginProcessor.h"
 #include "plugin/Tunings.h"
+#include "ui/LithiumLookAndFeel.h"
+#include "ui/PluginEditor.h"
+#include "ui/ShiftAnalyzer.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
@@ -205,6 +208,42 @@ public:
             expect (difference > 0.01, "output should differ from the delayed input at -2 st");
         }
 
+        beginTest ("Drop D -> Drop G moves a tone on input 1 down a fifth (input 2 silent, like a guitar interface)");
+        {
+            LowChugProcessor p;
+            setParam (p, params::sourceTuning, (float) tunings::Source::dropD);
+            setParam (p, params::targetTuning, (float) TuningsTests::indexOf ("Drop G"));
+            p.prepareToPlay (48000.0, 128);
+
+            const int n = 96000;
+            juce::AudioBuffer<float> buffer (2, n);
+            buffer.clear();
+            for (int i = 0; i < n; ++i)
+                buffer.setSample (0, i, 0.3f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * (float) i / 48000.0f));
+            juce::MidiBuffer midi;
+            for (int pos = 0; pos < n; pos += 128)
+            {
+                juce::AudioBuffer<float> block (buffer.getArrayOfWritePointers(), 2, pos, 128);
+                p.processBlock (block, midi);
+            }
+
+            // Pitch from zero crossings over the second half, and level.
+            int crossings = 0;
+            double sumSquares = 0.0;
+            for (int i = n / 2 + 1; i < n; ++i)
+            {
+                crossings += (buffer.getSample (0, i - 1) < 0.0f) != (buffer.getSample (0, i) < 0.0f) ? 1 : 0;
+                sumSquares += (double) buffer.getSample (0, i) * buffer.getSample (0, i);
+            }
+            const double measuredHz = crossings / 2.0 / ((n / 2 - 1) / 48000.0);
+            const double expectedHz = 220.0 * std::pow (2.0, -7.0 / 12.0);
+            const double rms = std::sqrt (sumSquares / (n / 2));
+            logMessage ("    measured " + juce::String (measuredHz, 2) + " Hz (expected " + juce::String (expectedHz, 2)
+                        + "), rms " + juce::String (rms, 3) + " (input 0.212)");
+            expectWithinAbsoluteError (measuredHz, expectedHz, 0.5);
+            expectWithinAbsoluteError (rms, 0.212, 0.03);
+        }
+
         beginTest ("Mono in, stereo out copies the shifted signal to both sides");
         {
             LowChugProcessor p;
@@ -254,9 +293,231 @@ public:
     }
 };
 
+
+//==============================================================================
+/** A guitar-ish chord: each string a sawtooth-like stack of decaying
+    harmonics, `shift` semitones away from its open pitch. */
+static float chordSample (const int* strings, int numStrings, float shift, int i, double rate)
+{
+    float x = 0.0f;
+    for (int s = 0; s < numStrings; ++s)
+    {
+        const auto hz = 440.0 * std::pow (2.0, (strings[s] + shift - 69.0) / 12.0);
+        for (int h = 1; h <= 8; ++h)
+            x += (float) (0.05 / h * std::sin (juce::MathConstants<double>::twoPi * hz * h * i / rate + s * 0.7 + h));
+    }
+    return x;
+}
+
+class ShiftAnalyzerTests final : public juce::UnitTest
+{
+public:
+    ShiftAnalyzerTests() : UnitTest ("Shift analyzer", "LowChug") {}
+
+    void runTest() override
+    {
+        const int dropD[] = { 38, 45, 50, 55, 59, 64 };
+
+        for (const auto [shift, latency] : { std::pair { -2.0f, 0 }, std::pair { -5.0f, 1024 }, std::pair { -1.25f, 333 },
+                                             std::pair { -12.0f, 1024 }, std::pair { 0.0f, 0 } })
+        {
+            beginTest ("Measures a " + juce::String (shift, 2) + " st shift of a chord (latency " + juce::String (latency) + ")");
+            ShiftAnalyzer analyzer;
+            analyzer.prepare (48000.0);
+
+            // Output = the input chord, shifted, arriving `latency` samples late.
+            const int n = 48000;
+            std::vector<float> in ((size_t) n), out ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                in[(size_t) i] = chordSample (dropD, 6, 0.0f, i, 48000.0);
+                out[(size_t) i] = i >= latency ? chordSample (dropD, 6, shift, i - latency, 48000.0) : 0.0f;
+            }
+
+            ShiftAnalyzer::Result r;
+            for (int pos = 0; pos < n; pos += 1600) // 30 updates a second, as the editor does
+            {
+                analyzer.push (in.data() + pos, out.data() + pos, 1600);
+                r = analyzer.update (latency, shift);
+            }
+
+            expect (r.state == ShiftAnalyzer::Result::State::measured, "should have measured a shift");
+            logMessage ("    measured " + juce::String (r.measuredSemitones, 3) + " st, confidence " + juce::String (r.confidence, 2));
+            expectWithinAbsoluteError (r.measuredSemitones, shift, 0.02f); // 2 cents
+        }
+
+        beginTest ("Silence is reported as silence");
+        {
+            ShiftAnalyzer analyzer;
+            analyzer.prepare (48000.0);
+            std::vector<float> zeros (48000, 0.0f);
+            analyzer.push (zeros.data(), zeros.data(), (int) zeros.size());
+            expect (analyzer.update (1024, -2.0f).state == ShiftAnalyzer::Result::State::silent);
+        }
+    }
+};
+
+//==============================================================================
+class EditorTests final : public juce::UnitTest
+{
+public:
+    EditorTests() : UnitTest ("Editor", "LowChug") {}
+
+    static float plain (LowChugProcessor& p, const char* id)
+    {
+        auto* param = p.getState().getParameter (id);
+        return param->convertFrom0to1 (param->getValue());
+    }
+
+    static void prepare (LowChugProcessor& p)
+    {
+        // Hosts set the rate before prepareToPlay; getSampleRate() reads it.
+        p.setRateAndBufferSizeDetails (48000.0, 512);
+        p.prepareToPlay (48000.0, 512);
+    }
+
+    /** Plays `seconds` of a Drop D chord through the processor in 512-sample blocks. */
+    static void playChord (LowChugProcessor& p, double seconds)
+    {
+        const int dropD[] = { 38, 45, 50, 55, 59, 64 };
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer midi;
+        for (int pos = 0; pos < (int) (seconds * 48000.0); pos += 512)
+        {
+            for (int i = 0; i < 512; ++i)
+                block.setSample (0, i, chordSample (dropD, 6, 0.0f, pos + i, 48000.0));
+            block.clear (1, 0, 512); // a guitar interface: input 2 silent
+            p.processBlock (block, midi);
+        }
+    }
+
+    static void saveSnapshot (juce::Component& c, const juce::String& name, float scale)
+    {
+        const auto dir = juce::SystemStats::getEnvironmentVariable ("LOWCHUG_SNAPSHOT_DIR", {});
+        if (dir.isEmpty())
+            return;
+        const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, scale);
+        juce::File file (juce::File (dir).getChildFile (name + ".png"));
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat().writeImageToStream (image, stream);
+    }
+
+    void runTest() override
+    {
+        beginTest ("Editor opens and closes without leaking");
+        {
+            LowChugProcessor p;
+            prepare (p);
+            expectEquals (EmbeddedFonts::getLiveCount(), 0);
+
+            for (int round = 0; round < 3; ++round)
+            {
+                // Exactly what the VST3/LV2 wrappers do when the host opens
+                // and closes the window: createEditorAndMakeActive(), then
+                // editorBeingDeleted() and delete.
+                std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorAndMakeActive());
+                expect (editor != nullptr);
+                expect (p.getActiveEditor() == editor.get());
+                expect (p.getAnalysisTap().isEnabled(), "the visualizer's tap runs while the editor is open");
+                expectEquals (EmbeddedFonts::getLiveCount(), 1);
+
+                editor->setSize (1200, 750); // resizing re-lays out and repaints
+                juce::Image image (juce::Image::ARGB, 1200, 750, true);
+                juce::Graphics g (image);
+                editor->paintEntireComponent (g, true);
+
+                p.editorBeingDeleted (editor.get());
+                editor.reset();
+                expect (p.getActiveEditor() == nullptr);
+                expect (! p.getAnalysisTap().isEnabled(), "closing the editor stops the tap");
+                expectEquals (EmbeddedFonts::getLiveCount(), 0); // every font and LookAndFeel released
+            }
+
+            // Parameters still work with no editor (no dangling listeners).
+            auto* shift = p.getState().getParameter (params::shift);
+            shift->setValueNotifyingHost (shift->convertTo0to1 (-7.0f));
+            playChord (p, 0.1);
+        }
+
+        beginTest ("Picking a Hear target moves the Shift knob to it");
+        {
+            LowChugProcessor p;
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& controller = editor->getMainView().getTuningController();
+            controller.pickTarget (TuningsTests::indexOf ("B Standard"));
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), TuningsTests::indexOf ("B Standard"));
+            expectWithinAbsoluteError (plain (p, params::shift), -5.0f, 1.0e-4f);
+            expectWithinAbsoluteError (editor->getMainView().getShiftSlider().getValue(), -5.0, 1.0e-4);
+        }
+
+        beginTest ("Turning Shift by hand sets Hear to Custom; the knob following its parameter does not");
+        {
+            LowChugProcessor p;
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& slider = editor->getMainView().getShiftSlider();
+
+            // Automation (or a preset) moves the parameter: Hear stays put.
+            auto* shift = p.getState().getParameter (params::shift);
+            shift->setValueNotifyingHost (shift->convertTo0to1 (-4.0f));
+            expectWithinAbsoluteError (slider.getValue(), -4.0, 1.0e-4);
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), tunings::defaultTargetIndex);
+
+            // The user presses an arrow key on the knob: Hear becomes Custom.
+            static_cast<juce::Component&> (slider).keyPressed (juce::KeyPress (juce::KeyPress::downKey));
+            expectWithinAbsoluteError (plain (p, params::shift), -5.0f, 1.0e-4f);
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), tunings::customTargetIndex);
+            expectEquals (p.getShiftSemitones(), -5);
+        }
+
+        beginTest ("Changing Playing in keeps the sound");
+        {
+            LowChugProcessor p;
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& controller = editor->getMainView().getTuningController();
+
+            controller.pickSource (tunings::Source::dropD); // D Standard (-2) -> Drop C (-2)
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), TuningsTests::indexOf ("Drop C"));
+            expectEquals (p.getShiftSemitones(), -2);
+
+            controller.pickSource (tunings::Source::custom); // no names: Custom, still -2
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), tunings::customTargetIndex);
+            expectEquals (p.getShiftSemitones(), -2);
+        }
+
+        beginTest ("The visualizer measures the real shift (Drop D -> Drop C)");
+        {
+            LowChugProcessor p;
+            auto* source = p.getState().getParameter (params::sourceTuning);
+            source->setValueNotifyingHost (source->convertTo0to1 ((float) tunings::Source::dropD));
+            auto* target = p.getState().getParameter (params::targetTuning);
+            target->setValueNotifyingHost (target->convertTo0to1 ((float) TuningsTests::indexOf ("Drop C")));
+            prepare (p);
+
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& readout = editor->getMainView().getReadoutPanel();
+            for (int i = 0; i < 30; ++i) // one second, analyzed 30 times like the timer would
+            {
+                playChord (p, 1.0 / 30.0);
+                readout.analyzeNow();
+            }
+
+            const auto& r = readout.getLastResult();
+            expect (r.state == ShiftAnalyzer::Result::State::measured, "should have measured the shift");
+            logMessage ("    measured " + juce::String (r.measuredSemitones, 3) + " st, confidence " + juce::String (r.confidence, 2));
+            expectWithinAbsoluteError (r.measuredSemitones, -2.0f, 0.05f); // within 5 cents: "On target"
+
+            saveSnapshot (*editor, "lowchug-editor-1x", 1.0f);
+            saveSnapshot (*editor, "lowchug-editor-2x", 2.0f);
+        }
+    }
+};
+
 // Static instances register the tests with JUCE's test runner.
 static TuningsTests tuningsTests;
 static ProcessorTests processorTests;
+static ShiftAnalyzerTests shiftAnalyzerTests;
+static EditorTests editorTests;
 
 } // namespace lowchug
 

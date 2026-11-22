@@ -25,7 +25,7 @@ FetchContent_Declare(signalsmith-stretch
 FetchContent_MakeAvailable(signalsmith-linear signalsmith-stretch)
 
 if(LOWCHUG_BUILD_PLUGIN)
-    # JUCE 8 and later is dual-licensed: AGPLv3, or a commercial JUCE licence.
+    # JUCE 8 and later is dual-licensed: AGPLv3, or a commercial JUCE license.
     FetchContent_Declare(JUCE
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
         GIT_TAG        9.0.4

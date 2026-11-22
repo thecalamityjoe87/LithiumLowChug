@@ -27,9 +27,43 @@ juce_add_plugin(LithiumLowChug
 target_sources(LithiumLowChug PRIVATE
     Parameters.cpp
     PluginProcessor.cpp
-    Tunings.cpp)
+    StandaloneAudio.cpp
+    Tunings.cpp
+    ../ui/AboutPanel.cpp
+    ../ui/Controls.cpp
+    ../ui/HeaderBar.cpp
+    ../ui/LithiumLookAndFeel.cpp
+    ../ui/MainView.cpp
+    ../ui/PluginEditor.cpp
+    ../ui/ReadoutPanel.cpp
+    ../ui/ShiftAnalyzer.cpp
+    ../ui/TuningController.cpp
+    ../ui/TuningPanel.cpp)
+
+# Every source includes headers relative to src/ ("plugin/...", "ui/...", "dsp/...").
+target_include_directories(LithiumLowChug PRIVATE ${PROJECT_SOURCE_DIR}/src)
+
+# The Lithium family fonts (SIL Open Font License, see assets/fonts/OFL-*.txt),
+# compiled into the plugin so it looks the same on every machine without
+# installing anything. JUCE turns each file into a byte array in the
+# LithiumFonts namespace (LithiumFonts::BarlowRegular_ttf etc.).
+juce_add_binary_data(LithiumFonts
+    NAMESPACE   LithiumFonts
+    HEADER_NAME LithiumFonts.h
+    SOURCES
+        ${PROJECT_SOURCE_DIR}/assets/fonts/Barlow-Regular.ttf
+        ${PROJECT_SOURCE_DIR}/assets/fonts/Barlow-Medium.ttf
+        ${PROJECT_SOURCE_DIR}/assets/fonts/Barlow-SemiBold.ttf
+        ${PROJECT_SOURCE_DIR}/assets/fonts/BarlowCondensed-Medium.ttf
+        ${PROJECT_SOURCE_DIR}/assets/fonts/BarlowCondensed-SemiBold.ttf
+        ${PROJECT_SOURCE_DIR}/assets/fonts/BarlowCondensed-Bold.ttf
+        ${PROJECT_SOURCE_DIR}/assets/fonts/IBMPlexMono-Regular.ttf
+        ${PROJECT_SOURCE_DIR}/assets/fonts/IBMPlexMono-Medium.ttf)
+set_target_properties(LithiumFonts PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_compile_definitions(LithiumLowChug PUBLIC
+    # Shown in the About panel.
+    LOWCHUG_AUTHOR_STRING="${LOWCHUG_AUTHOR}"
     # No web browser or network code in the plugin.
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
@@ -38,6 +72,7 @@ target_compile_definitions(LithiumLowChug PUBLIC
 target_link_libraries(LithiumLowChug
     PRIVATE
         lowchug_dsp
+        LithiumFonts
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC

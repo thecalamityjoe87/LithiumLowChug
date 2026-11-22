@@ -19,7 +19,7 @@ namespace lowchug::dsp
       1. STFT with a Hann window, zero-phase (frame rotated by N/2) so all
          bins of a sinusoid share roughly one phase.
       2. Find spectral peaks. Each peak owns a "region" of bins out to the
-         spectral minimum between it and its neighbours.
+         spectral minimum between it and its neighbors.
       3. Move every region, as a block, from its peak's bin to the shifted
          peak's bin, and rotate the whole region by one phase (identity phase
          locking). This keeps each partial's shape and vertical phase
@@ -70,7 +70,7 @@ private:
 
     void makeWindows();
     void processFrame();
-    void analyseSharedSpectrum();
+    void analyzeSharedSpectrum();
     bool detectTransient();
     void findPeaksAndRegions();
     void computeRegionShifts (bool resetPhases);

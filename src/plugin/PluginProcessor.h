@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AnalysisTap.h"
 #include "dsp/Detuner.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -68,9 +69,16 @@ public:
 
     juce::AudioProcessorValueTreeState& getState() { return state; }
 
-    /** The semitone shift the parameters currently ask for (shift + fine,
-        resolved through "Playing in" / "Hear"). */
+    /** The whole-semitone shift the parameters currently ask for: the Hear
+        target's shift, or the Shift knob when Hear (or Playing in) is
+        Custom. Reads atomics only, so it is safe on any thread. */
+    int getShiftSemitones() const;
+
+    /** getShiftSemitones() plus Fine, in semitones: what the engine is asked for. */
     float getEffectiveShift() const;
+
+    /** Copies of the audio for the editor's visualizer (see AnalysisTap). */
+    AnalysisTap& getAnalysisTap() noexcept { return analysisTap; }
 
 private:
     static BusesProperties makeBuses();
@@ -79,6 +87,7 @@ private:
 
     juce::AudioProcessorValueTreeState state;
     dsp::Detuner detuner;
+    AnalysisTap analysisTap;
 
     // Pointers into the APVTS's atomics, looked up once here rather than by
     // string on every block (a string lookup is a map search). Reading them

@@ -224,7 +224,7 @@ void PhaseVocoderEngine::processFrame()
         ch.spectrum[0] = { ch.spectrum[0].real(), 0.0f }; // drop the packed Nyquist bin
     }
 
-    analyseSharedSpectrum();
+    analyzeSharedSpectrum();
 
     // An onset first shows up faintly at the window's edge. Its phases are
     // reset a few frames later, when it reaches the window peak, so that the
@@ -256,7 +256,7 @@ void PhaseVocoderEngine::processFrame()
     }
 }
 
-void PhaseVocoderEngine::analyseSharedSpectrum()
+void PhaseVocoderEngine::analyzeSharedSpectrum()
 {
     std::fill (sumSpectrum.begin(), sumSpectrum.end(), Complex {});
     for (int c = 0; c < activeChannels; ++c)
@@ -335,7 +335,7 @@ void PhaseVocoderEngine::findPeaksAndRegions()
     if (regions.empty())
         return;
 
-    // Region boundaries sit at the quietest bin between neighbouring peaks.
+    // Region boundaries sit at the quietest bin between neighboring peaks.
     regions.front().start = 0;
     for (size_t r = 1; r < regions.size(); ++r)
     {
@@ -444,7 +444,7 @@ void PhaseVocoderEngine::synthesiseChannel (int channelIndex)
 
         // Fractional placement: each source bin is split between the two
         // destination bins either side of its exact new position (linear
-        // interpolation, accurate near the window centre where the weight is).
+        // interpolation, accurate near the window center where the weight is).
         // Regions can overlap after shifting (downward shifts squeeze them
         // together), so accumulate rather than overwrite.
         for (int k = first; k < last; ++k)
