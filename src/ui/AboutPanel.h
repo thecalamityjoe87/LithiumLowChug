@@ -32,8 +32,9 @@ private:
     juce::TextButton closeButton { "Close" };
 };
 
-/** About Lithium LowChug: the wordmark, version, who made it, a link to
-    the project, what it is and what it's built with. */
+/** About Lithium LowChug: the wordmark, version, who made it, links to
+    the project and its license, what it is, what it's built with, and the
+    license notice. */
 class AboutPanel final : public OverlayPanel
 {
 public:
@@ -45,6 +46,7 @@ private:
     void layoutContent() override;
 
     juce::TextButton websiteButton { "GitHub" };
+    juce::TextButton licenseButton { "License" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AboutPanel)
 };

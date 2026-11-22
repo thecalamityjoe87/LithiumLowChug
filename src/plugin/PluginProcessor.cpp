@@ -42,9 +42,24 @@ LowChugProcessor::LowChugProcessor()
     mixValue = state.getRawParameterValue (params::mix);
     outputValue = state.getRawParameterValue (params::output);
     bypassValue = state.getRawParameterValue (params::bypass);
+    modeValue = state.getRawParameterValue (params::mode);
+    formantValue = state.getRawParameterValue (params::formant);
+    tightValue = state.getRawParameterValue (params::tight);
+
+    // Latency follows the Mode parameter (Live 21 ms, Studio 48 ms). The
+    // listener catches changes made on the message thread (the editor, a
+    // preset, a restored session) at once; the timer catches the ones that
+    // arrive on other threads, such as host automation.
+    state.addParameterListener (params::mode, this);
+    startTimerHz (10);
 
     // Standalone app only: audio device fixes and an unmuted guitar input.
     setUpStandaloneAudio();
+}
+
+LowChugProcessor::~LowChugProcessor()
+{
+    state.removeParameterListener (params::mode, this);
 }
 
 bool LowChugProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -63,9 +78,12 @@ void LowChugProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamp
     // Called on the message thread before playback starts, and again whenever
     // the sample rate, block size or channel layout changes. All allocation
     // happens here, never in processBlock.
+    // Both modes' engines are prepared here, so switching modes later never
+    // allocates on the audio thread.
     detuner.prepare (sampleRate, maximumExpectedSamplesPerBlock, std::max (1, getTotalNumInputChannels()));
 
-    // Start from the current settings rather than gliding in from defaults.
+    // Start from the current settings (including the mode) rather than
+    // gliding or crossfading in from defaults.
     pushParametersToDsp (false);
     detuner.reset();
 
@@ -73,6 +91,49 @@ void LowChugProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamp
     // dry path is delayed by the same amount, so it is constant in every
     // state: shifted, unshifted, any mix, bypassed.
     setLatencySamples (detuner.getLatencySamples());
+}
+
+params::Mode LowChugProcessor::getModeParameter() const
+{
+    return modeValue->load() >= 0.5f ? params::Mode::studio : params::Mode::live;
+}
+
+int LowChugProcessor::getLatencySamplesFor (params::Mode mode) const
+{
+    // The engines know their latency once prepared (it depends on the rate).
+    if (getSampleRate() <= 0.0)
+        return 0;
+    return detuner.getLatencySamples (mode == params::Mode::studio ? dsp::Detuner::Mode::studio : dsp::Detuner::Mode::live);
+}
+
+void LowChugProcessor::updateReportedLatency()
+{
+    // setLatencySamples() notifies the host through JUCE's format wrapper,
+    // and that path takes a lock and may call into the host, so it belongs
+    // on the message thread, never the audio thread:
+    //   - VST3: the wrapper calls IComponentHandler::restartComponent
+    //     (kLatencyChanged); the host then asks getLatencySamples() again,
+    //     often deactivating and re-preparing the plugin to do it.
+    //   - LV2: the wrapper writes the latency to the plugin's "latency"
+    //     output port on every run(); hosts read that port, so the change
+    //     needs no message at all.
+    //   - AU (macOS): the wrapper fires a kAudioUnitProperty_Latency
+    //     property change.
+    //   - Standalone: no host compensation, nothing to tell.
+    // setLatencySamples does nothing when the value is unchanged, so calling
+    // this often is cheap.
+    jassert (juce::MessageManager::existsAndIsCurrentThread());
+    if (const int latency = getLatencySamplesFor (getModeParameter()); latency > 0)
+        setLatencySamples (latency);
+}
+
+void LowChugProcessor::parameterChanged (const juce::String&, float)
+{
+    // Called on whichever thread changed the parameter. Only act on the
+    // message thread; from the audio thread (automation), the timer picks
+    // the change up within 100 ms instead.
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        updateReportedLatency();
 }
 
 void LowChugProcessor::reset()
@@ -103,6 +164,13 @@ void LowChugProcessor::pushParametersToDsp (bool forceBypass)
     detuner.setMix (mixValue->load() / 100.0f);
     detuner.setOutputGain (juce::Decibels::decibelsToGain (outputValue->load()));
     detuner.setBypassed (forceBypass || bypassValue->load() >= 0.5f);
+    detuner.setFormantPreservation (formantValue->load() >= 0.5f);
+    detuner.setTight (tightValue->load() / 100.0f);
+
+    // A mode change crossfades inside the detuner (no allocation: both modes
+    // were prepared in prepareToPlay). The host hears about the new latency
+    // separately, from the message thread (updateReportedLatency).
+    detuner.setMode (getModeParameter() == params::Mode::studio ? dsp::Detuner::Mode::studio : dsp::Detuner::Mode::live);
 }
 
 void LowChugProcessor::process (juce::AudioBuffer<float>& buffer, bool forceBypass)

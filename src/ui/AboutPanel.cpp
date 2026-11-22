@@ -64,18 +64,29 @@ bool OverlayPanel::keyPressed (const juce::KeyPress& key)
 }
 
 //==============================================================================
+namespace
+{
+constexpr const char* licenseUrl = "https://www.gnu.org/licenses/agpl-3.0.html";
+}
+
 AboutPanel::AboutPanel()
-    : OverlayPanel (600, 430)
+    : OverlayPanel (600, 460)
 {
     websiteButton.setTooltip (JucePlugin_ManufacturerWebsite);
     websiteButton.onClick = [] { juce::URL (JucePlugin_ManufacturerWebsite).launchInDefaultBrowser(); };
     addAndMakeVisible (websiteButton);
+
+    licenseButton.setTooltip ("GNU Affero General Public License, version 3");
+    licenseButton.onClick = [] { juce::URL (licenseUrl).launchInDefaultBrowser(); };
+    addAndMakeVisible (licenseButton);
 }
 
 void AboutPanel::layoutContent()
 {
     const auto card = getCardBounds();
-    websiteButton.setBounds (card.getRight() - cardPadding - 112, card.getY() + cardPadding + 22, 112, 30);
+    // Top right, beside the wordmark: GitHub, and License under it.
+    websiteButton.setBounds (card.getRight() - cardPadding - 112, card.getY() + cardPadding + 2, 112, 30);
+    licenseButton.setBounds (websiteButton.getBounds().translated (0, 38));
 }
 
 void AboutPanel::paint (juce::Graphics& g)
@@ -121,7 +132,7 @@ void AboutPanel::paint (juce::Graphics& g)
     g.setFont (body (14.5f));
     const juce::String what = "LowChug is a guitar detuner: play in standard or Drop D and hear your guitar tuned lower, "
                               "chords and all. Use it as a VST3, LV2 or AU plugin, or on its own as a standalone app.";
-    g.drawFittedText (what, area.removeFromTop (42.0f).toNearestInt(), juce::Justification::topLeft, 2, 1.0f);
+    g.drawFittedText (what, area.removeFromTop (60.0f).toNearestInt(), juce::Justification::topLeft, 3, 1.0f);
     area.removeFromTop (14.0f);
 
     drawCaption (g, "BUILT WITH", area.removeFromTop (16.0f));
@@ -146,10 +157,15 @@ void AboutPanel::paint (juce::Graphics& g)
         g.drawText (license, row.withTrimmedLeft (row.getWidth() * 0.55f), juce::Justification::centredLeft, true);
     }
 
-    area.removeFromTop (8.0f);
+    // The GPL family asks interactive programs to show a copyright and
+    // no-warranty notice; this is it (as in Lithium Drums).
+    area.removeFromTop (10.0f);
     g.setColour (colors::textMuted);
     g.setFont (body (12.5f));
-    g.drawText ("Copyright (C) 2026 " LOWCHUG_AUTHOR_STRING ".", area.removeFromTop (18.0f), juce::Justification::centredLeft, true);
+    g.drawFittedText ("Copyright (C) 2026 " LOWCHUG_AUTHOR_STRING ". Lithium LowChug is free software: you can redistribute "
+                      "and change it under the terms of the GNU Affero General Public License, version 3. It comes with no "
+                      "warranty.",
+                      area.removeFromTop (36.0f).toNearestInt(), juce::Justification::topLeft, 2, 1.0f);
 }
 
 } // namespace lowchug

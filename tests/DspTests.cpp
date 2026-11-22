@@ -124,11 +124,11 @@ void testLatency (const char* label, PhaseVocoderEngine::Config config, double s
     check (measured == engine.getLatencySamples(), what, measured);
 }
 
-void testBlockSizeIndependence()
+void testBlockSizeIndependence (const char* label, PhaseVocoderEngine::Config config)
 {
     // Hosts may send any block size, varying from call to call; the output
-    // must not depend on it.
-    PhaseVocoderEngine engine (liveConfig());
+    // must not depend on it (Studio's split computation included).
+    PhaseVocoderEngine engine (config);
     const auto input = sine (98.0, 1.5, 48000.0);
     const auto a = runEngine (engine, input, 48000.0, 0.75f, [] { return 128; });
     unsigned state = 1;
@@ -139,7 +139,9 @@ void testBlockSizeIndependence()
     double maxDiff = 0.0;
     for (size_t i = 0; i < a.size(); ++i)
         maxDiff = std::max (maxDiff, (double) std::abs (a[i] - b[i]));
-    check (maxDiff == 0.0, "random 1-512 sample blocks give bit-identical output (max diff)", maxDiff);
+    char what[128];
+    std::snprintf (what, sizeof (what), "%s: random 1-512 sample blocks give bit-identical output (max diff)", label);
+    check (maxDiff == 0.0, what, maxDiff);
 }
 // ---- Detuner (the full effect chain) ----------------------------------------
 
@@ -198,18 +200,21 @@ bool isExactlyDelayed (const Stereo& in, const Stereo& out, int delay)
     return true;
 }
 
-void testDetunerNullAtZero()
+const char* modeName (Detuner::Mode m) { return m == Detuner::Mode::studio ? "Studio" : "Live"; }
+
+void testDetunerNullAtZero (Detuner::Mode mode)
 {
     for (double sampleRate : { 44100.0, 96000.0, 48000.0 }) // re-prepare at each rate, like a host would
     {
         Detuner detuner;
+        detuner.setMode (mode);
         detuner.setShiftSemitones (0.0f);
         detuner.prepare (sampleRate, 512, 2);
         const auto in = noise (2, 1.0, sampleRate, 7);
         const auto out = runDetuner (detuner, in, randomBlocks (3));
         char what[128];
-        std::snprintf (what, sizeof (what), "Detuner @ %.0f Hz: 0 st nulls bit-exactly against the input delayed by the latency",
-                       sampleRate);
+        std::snprintf (what, sizeof (what), "Detuner %s @ %.0f Hz: 0 st nulls bit-exactly against the input delayed by the latency",
+                       modeName (mode), sampleRate);
         check (isExactlyDelayed (in, out, detuner.getLatencySamples()), what, detuner.getLatencySamples());
     }
 }
@@ -235,11 +240,12 @@ void testDetunerDryStatesExact()
     }
 }
 
-void testDetunerWetLatency()
+void testDetunerWetLatency (Detuner::Mode mode, int expectedLatency)
 {
     // A 1-cent shift runs the engine but leaves an impulse's peak in place:
     // the shifted path must line up with the dry delay.
     Detuner detuner;
+    detuner.setMode (mode);
     detuner.setShiftSemitones (0.01f);
     detuner.prepare (48000.0, 512, 1);
     Stereo impulse (1, std::vector<float> (48000, 0.0f));
@@ -250,8 +256,10 @@ void testDetunerWetLatency()
         if (std::abs (out[0][i]) > std::abs (out[0][peak]))
             peak = i;
     const int measured = (int) peak - 12000;
-    check (measured == detuner.getLatencySamples(), "Detuner: shifted path latency == reported latency == dry delay (measured)",
-           measured);
+    char what[160];
+    std::snprintf (what, sizeof (what), "Detuner %s: shifted path latency == reported latency (%d) == dry delay (measured)",
+                   modeName (mode), expectedLatency);
+    check (measured == detuner.getLatencySamples() && measured == expectedLatency, what, measured);
 }
 
 /** Loudest 2 ms of content above 2 kHz relative to the signal's RMS, in dB.
@@ -315,7 +323,11 @@ void testDetunerAutomationClicks()
     const double sampleRate = 48000.0;
     const Stereo chord { lowChord (1.5, sampleRate) };
     const auto jumpAt = (size_t) (0.75 * sampleRate), measureFrom = (size_t) (0.4 * sampleRate);
-    auto makeDetuner = [] { return Detuner (std::make_unique<PhaseVocoderEngine> (configs::studio())); };
+    auto makeDetuner = [] {
+        Detuner d;
+        d.setMode (Detuner::Mode::studio);
+        return d;
+    };
 
     auto steadyOutput = [&] (float semitones) {
         auto d = makeDetuner();
@@ -368,7 +380,90 @@ void testDetunerAutomationClicks()
     check (sweepExcess < 3.0, "Detuner: per-block fine-tune automation adds no clicks (worst dB above steady residue)", sweepExcess);
 }
 
-void testDetunerChannelLinking()
+
+void testDetunerModeSwitching()
+{
+    const double sampleRate = 48000.0;
+    const Stereo chord { lowChord (3.0, sampleRate) };
+    const auto measureFrom = (size_t) (0.4 * sampleRate);
+
+    auto steadyResidue = [&] (Detuner::Mode mode, float semitones) {
+        Detuner d;
+        d.setMode (mode);
+        d.setShiftSemitones (semitones);
+        d.prepare (sampleRate, 512, 1);
+        return worstClickDb (runDetuner (d, chord, [] { return 128; })[0], measureFrom, sampleRate);
+    };
+
+    // A click is anything the switch adds above the louder of the two
+    // modes' own steady residues. At 0 st the output is the dry sine chord,
+    // with nothing at all above 2 kHz (a -145 dB "residue"), so the floor is
+    // never taken below -90 dB re the signal: far below anything audible
+    // under a real guitar, whose own treble sits tens of dB higher.
+    for (float semitones : { -5.0f, 0.0f, -12.0f })
+    {
+        const double floor = std::max ({ steadyResidue (Detuner::Mode::live, semitones),
+                                         steadyResidue (Detuner::Mode::studio, semitones), -90.0 });
+
+        struct Scenario { const char* name; std::vector<std::pair<double, Detuner::Mode>> changes; };
+        const Scenario scenarios[] = {
+            { "Live -> Studio", { { 0.8, Detuner::Mode::studio } } },
+            { "Live -> Studio -> Live", { { 0.8, Detuner::Mode::studio }, { 1.8, Detuner::Mode::live } } },
+            { "switched back during the warm-up", { { 0.8, Detuner::Mode::studio }, { 0.9, Detuner::Mode::live } } },
+            // The Studio engine needs ~219 ms to warm up, then a 30 ms fade:
+            // 1.03 s lands in the middle of the fade.
+            { "switched back during the crossfade", { { 0.8, Detuner::Mode::studio }, { 1.03, Detuner::Mode::live } } },
+            { "rapid toggling", { { 0.8, Detuner::Mode::studio }, { 0.85, Detuner::Mode::live }, { 0.9, Detuner::Mode::studio },
+                                  { 1.2, Detuner::Mode::live }, { 1.25, Detuner::Mode::studio } } },
+        };
+
+        for (const auto& scenario : scenarios)
+        {
+            Detuner d;
+            d.setShiftSemitones (semitones);
+            d.prepare (sampleRate, 512, 1);
+            const auto out = runDetuner (d, chord, randomBlocks (21), [&] (size_t pos) {
+                for (const auto& [at, mode] : scenario.changes)
+                    if ((double) pos >= at * sampleRate)
+                        d.setMode (mode);
+            });
+            const double excess = worstClickDb (out[0], measureFrom, sampleRate) - floor;
+            char what[160];
+            std::snprintf (what, sizeof (what), "Mode switch at %+.0f st, %s: no click (dB above steady residue)",
+                           (double) semitones, scenario.name);
+            check (excess < 3.0, what, excess);
+
+            const auto finalMode = scenario.changes.back().second;
+            std::snprintf (what, sizeof (what), "Mode switch at %+.0f st, %s: settles in the requested mode with its latency",
+                           (double) semitones, scenario.name);
+            check (! d.isSwitchingModes() && d.getMode() == finalMode
+                       && d.getLatencySamples() == d.getLatencySamples (finalMode), what, d.getLatencySamples());
+        }
+    }
+
+    {
+        // After switching, the output is the Studio path in time: an impulse
+        // at 0 st comes out exactly the Studio latency late.
+        Detuner d;
+        d.setShiftSemitones (0.0f);
+        d.prepare (sampleRate, 512, 1);
+        Stereo impulse (1, std::vector<float> ((size_t) sampleRate, 0.0f));
+        impulse[0][(size_t) (0.7 * sampleRate)] = 1.0f;
+        const auto out = runDetuner (d, impulse, [] { return 128; }, [&] (size_t pos) {
+            if (pos >= (size_t) (0.1 * sampleRate))
+                d.setMode (Detuner::Mode::studio);
+        });
+        size_t peak = 0;
+        for (size_t i = 0; i < out[0].size(); ++i)
+            if (std::abs (out[0][i]) > std::abs (out[0][peak]))
+                peak = i;
+        const int measured = (int) peak - (int) (0.7 * sampleRate);
+        check (measured == d.getLatencySamples (Detuner::Mode::studio), "After Live -> Studio the output has the Studio latency (measured)",
+               measured);
+    }
+}
+
+void testDetunerChannelLinking (Detuner::Mode mode)
 {
     // A mono source on a stereo track, which then briefly diverges (e.g. a
     // stereo effect before LowChug) and goes back to identical.
@@ -383,6 +478,7 @@ void testDetunerChannelLinking()
     bool wasLinked = false;
     for (auto* d : { &linkedDetuner, &fullDetuner })
     {
+        d->setMode (mode);
         d->setShiftSemitones (-5.0f);
         d->prepare (sampleRate, 512, 2);
     }
@@ -395,12 +491,17 @@ void testDetunerChannelLinking()
     for (size_t c = 0; c < 2; ++c)
         for (size_t i = 0; i < a[c].size(); ++i)
             maxDiff = std::max (maxDiff, (double) std::abs (a[c][i] - b[c][i]));
-    check (wasLinked && linkedDetuner.isChannelLinkingActive(), "Detuner: identical stereo channels get linked (shifted once)");
-    check (maxDiff < 1.0e-4, "Detuner: linked output matches full stereo processing, through link/unlink (max diff)", maxDiff);
+    char what[160];
+    std::snprintf (what, sizeof (what), "Detuner %s: identical stereo channels get linked (shifted once)", modeName (mode));
+    check (wasLinked && linkedDetuner.isChannelLinkingActive(), what);
+    std::snprintf (what, sizeof (what), "Detuner %s: linked output matches full stereo processing, through link/unlink (max diff)",
+                   modeName (mode));
+    check (maxDiff < 1.0e-4, what, maxDiff);
 
     // Cost: linked stereo should cost about the same as mono.
     auto timeIt = [&] (bool linking) {
         Detuner d;
+        d.setMode (mode);
         d.setChannelLinkingEnabled (linking);
         d.setShiftSemitones (-5.0f);
         d.prepare (sampleRate, 512, 2);
@@ -410,10 +511,296 @@ void testDetunerChannelLinking()
         return std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
     };
     const double unlinkedSeconds = timeIt (false), linkedSeconds = timeIt (true);
-    std::printf ("      (identical stereo: %.2f%% CPU linked vs %.2f%% unlinked at 48 kHz / 128)\n",
+    std::printf ("      (%s, identical stereo: %.2f%% CPU linked vs %.2f%% unlinked at 48 kHz / 128)\n", modeName (mode),
                  100.0 * linkedSeconds / 5.0, 100.0 * unlinkedSeconds / 5.0);
-    check (linkedSeconds < 0.8 * unlinkedSeconds, "Detuner: linked stereo is cheaper than full stereo (time ratio)",
-           linkedSeconds / unlinkedSeconds);
+    std::snprintf (what, sizeof (what), "Detuner %s: linked stereo is cheaper than full stereo (time ratio)", modeName (mode));
+    check (linkedSeconds < 0.8 * unlinkedSeconds, what, linkedSeconds / unlinkedSeconds);
+}
+
+// ---- Milestone 3: residue, formant, Tight, pre-echo -------------------------
+
+std::vector<float> tones (std::initializer_list<double> frequencies, double seconds, double sampleRate)
+{
+    std::vector<float> s ((size_t) (seconds * sampleRate));
+    for (size_t i = 0; i < s.size(); ++i)
+    {
+        double v = 0.0;
+        for (double f : frequencies)
+            v += std::sin (2.0 * std::numbers::pi * f * (double) i / sampleRate);
+        s[i] = float (0.25 * v);
+    }
+    return s;
+}
+
+/** Steady energy above `cutoff` relative to the whole signal, in dB (1.0 to 2.8 s). */
+double trebleResidueDb (const std::vector<float>& out, double sampleRate, double cutoff = 2000.0)
+{
+    // 8th-order high-pass (four RBJ biquads).
+    const double w = 2.0 * std::numbers::pi * cutoff / sampleRate, alpha = std::sin (w) / (2.0 * 0.7071), cw = std::cos (w);
+    const double a0 = 1.0 + alpha, b0 = (1.0 + cw) / 2.0 / a0, b1 = -(1.0 + cw) / a0, a1 = -2.0 * cw / a0, a2 = (1.0 - alpha) / a0;
+    std::vector<double> hp (out.begin(), out.end());
+    for (int pass = 0; pass < 4; ++pass)
+    {
+        double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        for (auto& v : hp)
+        {
+            const double y = b0 * v + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = v; y2 = y1; y1 = y;
+            v = y;
+        }
+    }
+    double high = 0, all = 0;
+    for (size_t i = (size_t) (1.0 * sampleRate); i < (size_t) (2.8 * sampleRate); ++i)
+    {
+        high += hp[i] * hp[i];
+        all += (double) out[i] * out[i];
+    }
+    return 10.0 * std::log10 (high / all + 1e-30);
+}
+
+void testTrebleResidue()
+{
+    // Pure low sines: nothing above 2 kHz, so whatever the engine puts there
+    // is its own residue. Milestone 1's Live engine left about -61 dB at -1 st
+    // up to -42 dB at -12 st on the chord; the partial model fixed it.
+    const double sampleRate = 48000.0;
+    struct Limit { const char* name; PhaseVocoderEngine::Config config; double chord, single; };
+    const Limit limits[] = { { "Live", liveConfig(), -60.0, -100.0 }, { "Studio", studioConfig(), -85.0, -120.0 } };
+    for (const auto& limit : limits)
+    {
+        PhaseVocoderEngine engine (limit.config);
+        double worstChord = -200.0, worstSingle = -200.0;
+        for (int st : { -1, -5, -12 })
+        {
+            const float ratio = (float) std::exp2 (st / 12.0);
+            worstChord = std::max (worstChord, trebleResidueDb (runEngine (engine, tones ({ 82.41, 123.47, 164.81 }, 3.0, sampleRate),
+                                                                           sampleRate, ratio, [] { return 128; }), sampleRate));
+            worstSingle = std::max (worstSingle, trebleResidueDb (runEngine (engine, tones ({ 82.41 }, 3.0, sampleRate),
+                                                                            sampleRate, ratio, [] { return 128; }), sampleRate));
+        }
+        char what[160];
+        std::snprintf (what, sizeof (what), "%s: treble residue on a low power chord at -1/-5/-12 st below %.0f dB (worst dB)",
+                       limit.name, limit.chord);
+        check (worstChord < limit.chord, what, worstChord);
+        std::snprintf (what, sizeof (what), "%s: treble residue on a low E at -1/-5/-12 st below %.0f dB (worst dB)",
+                       limit.name, limit.single);
+        check (worstSingle < limit.single, what, worstSingle);
+    }
+}
+
+/** A body/pickup-like resonance curve: peaks at 600 Hz and 2.4 kHz. */
+double resonance (double f)
+{
+    auto peak = [] (double x, double center, double q) { const double d = x / center - center / x; return 1.0 / std::sqrt (1.0 + q * q * d * d); };
+    return 0.15 + peak (f, 600.0, 2.0) + 0.7 * peak (f, 2400.0, 3.0);
+}
+
+void testFormant()
+{
+    // A low E whose harmonics are shaped by fixed resonances. Formant off,
+    // the resonances move down with the pitch (the classic pedal sound);
+    // on, they stay put. Measured per harmonic: each output harmonic's
+    // level against both expectations.
+    const double sampleRate = 48000.0, f0 = 82.41;
+    std::vector<float> input ((size_t) (3.0 * sampleRate), 0.0f);
+    for (int h = 1; h * f0 < 8000.0; ++h)
+    {
+        const double a = 0.05 * resonance (h * f0) / std::sqrt ((double) h), w = 2.0 * std::numbers::pi * h * f0 / sampleRate;
+        for (size_t i = 0; i < input.size(); ++i)
+            input[i] += float (a * std::sin (w * (double) i + h));
+    }
+
+    auto deviation = [&] (const std::vector<float>& out, double ratio, bool kept)
+    {
+        const size_t n = 131072;
+        signalsmith::linear::RealFFT<float> fft (n);
+        std::vector<float> time (n, 0.0f);
+        std::vector<std::complex<float>> freq (n / 2);
+        const size_t start = (size_t) (0.4 * sampleRate), length = (size_t) (2.5 * sampleRate);
+        for (size_t i = 0; i < length; ++i)
+            time[i] = out[start + i] * float (0.5 - 0.5 * std::cos (2.0 * std::numbers::pi * (double) i / (double) length));
+        fft.fft (time.data(), freq.data());
+        std::vector<double> difference;
+        for (int h = 1; h * f0 * ratio < 6000.0 && h * f0 < 8000.0; ++h) // (the input stops at 8 kHz)
+        {
+            const auto k = (size_t) std::lround (h * f0 * ratio / sampleRate * (double) n);
+            double e = 0.0;
+            for (size_t j = k - 3; j <= k + 3; ++j)
+                e += std::norm (freq[j]);
+            const double expected = resonance (kept ? h * f0 * ratio : h * f0) / std::sqrt ((double) h);
+            difference.push_back (10.0 * std::log10 (e + 1e-30) - 20.0 * std::log10 (expected));
+        }
+        double mean = 0.0, spread = 0.0;
+        for (double d : difference)
+            mean += d / (double) difference.size();
+        for (double d : difference)
+            spread += (d - mean) * (d - mean) / (double) difference.size();
+        return std::sqrt (spread); // rms dB, overall level aside
+    };
+
+    for (auto [name, config] : { std::pair { "Live", liveConfig() }, std::pair { "Studio", studioConfig() } })
+    {
+        PhaseVocoderEngine engine (config);
+        const double ratio = std::exp2 (-7.0 / 12.0);
+        engine.setFormantPreservation (false);
+        const auto off = runEngine (engine, input, sampleRate, (float) ratio, [] { return 128; });
+        engine.setFormantPreservation (true);
+        const auto on = runEngine (engine, input, sampleRate, (float) ratio, [] { return 128; });
+
+        char what[160];
+        std::snprintf (what, sizeof (what), "%s formant off at -7 st: resonances move with the pitch (rms dB from that)", name);
+        check (deviation (off, ratio, false) < 0.5, what, deviation (off, ratio, false));
+        std::snprintf (what, sizeof (what), "%s formant on at -7 st: resonances stay put (rms dB from that)", name);
+        check (deviation (on, ratio, true) < 1.5, what, deviation (on, ratio, true));
+    }
+}
+
+void testTight()
+{
+    const double sampleRate = 48000.0;
+
+    {
+        // Tight at 0 is exactly no Tight.
+        const auto in = noise (2, 1.0, sampleRate, 17);
+        Detuner a, b;
+        for (auto* d : { &a, &b })
+        {
+            d->setShiftSemitones (-5.0f);
+            d->prepare (sampleRate, 512, 2);
+        }
+        b.setTight (0.0f);
+        const auto outA = runDetuner (a, in, randomBlocks (4));
+        const auto outB = runDetuner (b, in, randomBlocks (4));
+        check (outA == outB, "Tight 0 is bit-identical to no Tight");
+    }
+
+    // Level of a tone through the detuner at `semitones`, Tight `amount`, in dB.
+    auto levelOf = [&] (double inputHz, float semitones, float amount)
+    {
+        Detuner d;
+        d.setShiftSemitones (semitones);
+        d.setTight (amount);
+        d.prepare (sampleRate, 512, 1);
+        const auto out = runDetuner (d, { sine (inputHz, 2.0, sampleRate) }, [] { return 128; });
+        double e = 0.0;
+        for (size_t i = (size_t) sampleRate; i < out[0].size(); ++i)
+            e += (double) out[0][i] * out[0][i];
+        return 10.0 * std::log10 (e);
+    };
+
+    // It follows the shift: a tone that comes out an octave below where the
+    // low E lands is cut, whatever the shift; one that comes out five
+    // octaves above it (the guitar's upper range) is left alone.
+    for (float st : { -2.0f, -7.0f, -12.0f })
+    {
+        const double ratio = std::exp2 (st / 12.0);
+        const double sub = levelOf (82.41 / 2.0, st, 1.0f) - levelOf (82.41 / 2.0, st, 0.0f);
+        const double upper = levelOf (82.41 * 32.0 / ratio * ratio, st, 1.0f) - levelOf (82.41 * 32.0 / ratio * ratio, st, 0.0f);
+        char what[160];
+        std::snprintf (what, sizeof (what), "Tight 100 %% at %+.0f st: an octave below the low E is cut by >= 8 dB (dB)", (double) st);
+        check (sub < -8.0, what, sub);
+        std::snprintf (what, sizeof (what), "Tight 100 %% at %+.0f st: the upper range is untouched, within 0.3 dB (dB)", (double) st);
+        check (std::abs (upper) < 0.3, what, upper);
+    }
+
+    {
+        // Turning Tight up and down on a playing chord adds no click.
+        const Stereo chord { lowChord (2.0, sampleRate) };
+        auto run = [&] (bool automate)
+        {
+            Detuner d;
+            d.setMode (Detuner::Mode::studio); // the cleaner engine makes the click test sensitive
+            d.setShiftSemitones (-7.0f);
+            d.prepare (sampleRate, 512, 1);
+            return runDetuner (d, chord, randomBlocks (8), [&] (size_t pos) {
+                if (automate)
+                    d.setTight (pos > (size_t) (0.8 * sampleRate) && pos < (size_t) (1.4 * sampleRate) ? 1.0f : 0.0f);
+            })[0];
+        };
+        const double excess = worstClickDb (run (true), (size_t) (0.4 * sampleRate), sampleRate)
+                              - std::max (worstClickDb (run (false), (size_t) (0.4 * sampleRate), sampleRate), -90.0);
+        check (excess < 3.0, "Tight automation 0 -> 100 % -> 0 adds no click (dB above steady residue)", excess);
+    }
+}
+
+void testNoPreEcho()
+{
+    // A note can't sound before it's played. A low E picked after silence,
+    // shifted -5 st: anything above 2 kHz from 40 ms to 4 ms before the pick
+    // is pre-echo (milestone 1: -30 dB in Live, -33 dB in Studio).
+    const double sampleRate = 48000.0, at = 0.8;
+    std::vector<float> pluck ((size_t) (1.6 * sampleRate), 0.0f);
+    for (int h = 1; h * 82.41 < 10000.0; ++h)
+    {
+        const double w = 2.0 * std::numbers::pi * h * 82.41 / sampleRate, decay = 1.5 * (1.0 + h * 0.3);
+        for (size_t i = (size_t) (at * sampleRate); i < pluck.size(); ++i)
+        {
+            const double t = (double) i / sampleRate - at;
+            const double attack = std::min (1.0, t / 0.0015);
+            pluck[i] += float (0.3 / h * attack * std::exp (-t * decay) * std::sin (w * t * sampleRate + h));
+        }
+    }
+
+    for (auto [name, config] : { std::pair { "Live", liveConfig() }, std::pair { "Studio", studioConfig() } })
+    {
+        PhaseVocoderEngine engine (config);
+        auto out = runEngine (engine, pluck, sampleRate, (float) std::exp2 (-5.0 / 12.0), [] { return 128; });
+        // Remove the latency: output sample i + latency belongs to input sample i.
+        out.erase (out.begin(), out.begin() + engine.getLatencySamples());
+        out.resize (pluck.size(), 0.0f);
+
+        const double w = 2.0 * std::numbers::pi * 2000.0 / sampleRate, alpha = std::sin (w) / (2.0 * 0.7071), cw = std::cos (w);
+        const double a0 = 1.0 + alpha, b0 = (1.0 + cw) / 2.0 / a0, b1 = -(1.0 + cw) / a0, a1 = -2.0 * cw / a0, a2 = (1.0 - alpha) / a0;
+        std::vector<double> hp (out.begin(), out.end());
+        for (int pass = 0; pass < 4; ++pass)
+        {
+            double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+            for (auto& v : hp)
+            {
+                const double y = b0 * v + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2;
+                x2 = x1; x1 = v; y2 = y1; y1 = y;
+                v = y;
+            }
+        }
+        auto energy = [&] (double from, double to)
+        {
+            double e = 1e-30;
+            for (size_t i = (size_t) ((at + from) * sampleRate); i < (size_t) ((at + to) * sampleRate); ++i)
+                e += hp[i] * hp[i];
+            return e;
+        };
+        const double preEcho = 10.0 * std::log10 (energy (-0.040, -0.004) / energy (0.0, 0.020));
+        char what[160];
+        std::snprintf (what, sizeof (what), "%s: no pre-echo before a pick (treble 40-4 ms before, dB re the attack)", name);
+        check (preEcho < -60.0, what, preEcho);
+    }
+}
+
+void testCpu()
+{
+    // Not a pass/fail check (timing depends on the machine): the numbers
+    // the brief's budget refers to, Live under ~3 % of one core at 48 kHz /
+    // 128 with formant on.
+    const double sampleRate = 48000.0;
+    const auto chord = lowChord (5.0, sampleRate);
+    for (auto mode : { Detuner::Mode::live, Detuner::Mode::studio })
+        for (bool formant : { false, true })
+        {
+            double best = 1e9;
+            for (int repeat = 0; repeat < 3; ++repeat)
+            {
+                Detuner d;
+                d.setMode (mode);
+                d.setFormantPreservation (formant);
+                d.setShiftSemitones (-5.0f);
+                d.prepare (sampleRate, 512, 1);
+                const auto t0 = std::chrono::steady_clock::now();
+                runDetuner (d, { chord }, [] { return 128; });
+                best = std::min (best, std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count());
+            }
+            std::printf ("      (CPU, mono, %s, formant %s: %.2f%% of one core at 48 kHz / 128)\n", modeName (mode),
+                         formant ? "on" : "off", 100.0 * best / 5.0);
+        }
 }
 } // namespace
 
@@ -472,16 +859,27 @@ int main()
     {
         testPitchAccuracy ("Live", liveConfig(), sampleRate);
         testLatency ("Live", liveConfig(), sampleRate);
+        testPitchAccuracy ("Studio", studioConfig(), sampleRate);
+        testLatency ("Studio", studioConfig(), sampleRate);
     }
-    testPitchAccuracy ("Studio", studioConfig(), 48000.0);
-    testLatency ("Studio", studioConfig(), 48000.0);
-    testBlockSizeIndependence();
+    testBlockSizeIndependence ("Live", liveConfig());
+    testBlockSizeIndependence ("Studio", studioConfig());
 
-    testDetunerNullAtZero();
+    for (auto mode : { Detuner::Mode::live, Detuner::Mode::studio })
+        testDetunerNullAtZero (mode);
     testDetunerDryStatesExact();
-    testDetunerWetLatency();
+    testDetunerWetLatency (Detuner::Mode::live, 1024);
+    testDetunerWetLatency (Detuner::Mode::studio, 2304);
     testDetunerAutomationClicks();
-    testDetunerChannelLinking();
+    testDetunerModeSwitching();
+    for (auto mode : { Detuner::Mode::live, Detuner::Mode::studio })
+        testDetunerChannelLinking (mode);
+
+    testTrebleResidue();
+    testFormant();
+    testTight();
+    testNoPreEcho();
+    testCpu();
 
     for (double sampleRate : { 44100.0, 48000.0, 96000.0 })
         testPitchDetector (sampleRate);

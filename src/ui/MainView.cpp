@@ -16,8 +16,6 @@ const juce::Rectangle<int> readoutCard { tuningCard.getRight() + space::panelGap
 const juce::Rectangle<int> knobsCard { space::page, tuningCard.getBottom() + space::panelGap, 452,
                                        windowHeight - space::page - (tuningCard.getBottom() + space::panelGap) };
 
-constexpr const char* comingSoonTip = "Coming in the next version.";
-
 juce::RangedAudioParameter& param (LowChugProcessor& p, const char* id)
 {
     return *p.getState().getParameter (id);
@@ -47,12 +45,15 @@ MainView::MainView (LowChugProcessor& p)
           "Fine: nudges the pitch up or down by up to 50 cents, to match a band tuned slightly off.",
           "Mix: how much of the shifted guitar you hear. 100 % is shifted only; lower blends in your guitar as played.",
           "Output: the output level. Double-click any knob to reset it." }),
-      qualityHelp ("Quality (coming soon)", {
-          "These arrive in the next update.",
-          "Live / Studio: Live has the lowest latency (21 ms), for playing. Studio sounds cleaner in the lows with "
-          "43 ms of latency, for recording and mixing.",
-          "Formant: keeps your guitar sounding like itself as you tune down, rather than darker and boomier.",
-          "Tight: tightens the low end on big drops." })
+      qualityHelp ("Quality", {
+          "Live / Studio: Live has the shortest delay (21 ms), for playing through. Studio listens longer for the "
+          "cleanest low end, with 48 ms of delay, for recording and mixing; your DAW keeps it in time. Switching "
+          "crossfades after a moment.",
+          "Formant: keeps the tone of your guitar (its body and pickup resonances) where it was while the pitch goes "
+          "down, so it sounds like your guitar tuned lower rather than darker and boomier. Off is the classic pitch "
+          "pedal sound.",
+          "Tight: a gentle low cut that follows the shift: the lower you go, the lower it sits. Turn it up when big "
+          "drops get muddy." })
 {
     addAndMakeVisible (header);
     addAndMakeVisible (tuning);
@@ -79,26 +80,36 @@ MainView::MainView (LowChugProcessor& p)
     // automation or a Hear click moving the knob never triggers this.
     shiftKnob.getSlider().onUserChange = [this] { controller.shiftMovedByHand(); };
 
-    // Coming soon.
+    // Quality. The two mode segments drive one choice parameter through a
+    // ParameterAttachment: a click writes it as a complete gesture (so the
+    // host records it), and the attachment's callback (always on the message
+    // thread) lights whichever segment matches, however the value changed.
     const char* modeNames[] = { "Live", "Studio" };
+    const char* modeTips[] = { "Live: the shortest delay (21 ms), for playing through.",
+                               "Studio: the cleanest low end, with 48 ms of delay, for recording and mixing." };
     for (int i = 0; i < 2; ++i)
     {
         auto& b = modeButtons[(size_t) i];
         b.setButtonText (modeNames[i]);
+        b.setTooltip (modeTips[i]);
         b.getProperties().set ("segment", true);
-        b.setEnabled (false);
-        b.setTooltip (comingSoonTip);
+        // A selected segment is raised, not lit: the accent is for things
+        // that are switched on.
+        b.setColour (juce::TextButton::buttonOnColourId, colors::borderStrong);
+        b.setColour (juce::TextButton::textColourOnId, colors::text);
+        b.setRadioGroupId (1);
+        b.onClick = [this, i] { modeAttachment.setValueAsCompleteGesture ((float) i); };
         addAndMakeVisible (b);
     }
     modeAttachment.sendInitialUpdate();
 
+    // ButtonAttachment toggles the parameter on click and follows it back.
     formantButton.setClickingTogglesState (true);
-    formantButton.setEnabled (false);
-    formantButton.setTooltip (comingSoonTip);
+    formantButton.setColour (juce::TextButton::textColourOffId, colors::text);
+    formantButton.setTooltip ("Formant: keep your guitar's own tone while the pitch drops. Off: the classic pedal sound.");
     addAndMakeVisible (formantButton);
 
-    tightKnob.setEnabled (false);
-    tightKnob.getSlider().setTooltip (comingSoonTip);
+    tightKnob.getSlider().setTooltip ("Tight: a gentle low cut that follows the shift, for big drops that get muddy.");
     addAndMakeVisible (tightKnob);
 
     addAndMakeVisible (controlsHelp);
@@ -115,13 +126,14 @@ void MainView::showAbout (bool show)
     if (show)
     {
         about.toFront (false);
-        about.grabKeyboardFocus(); // for Escape
+        if (about.isShowing()) // focus needs a window on screen (not so in tests)
+            about.grabKeyboardFocus(); // for Escape
     }
 }
 
 juce::Rectangle<int> MainView::getKnobsCard() const { return knobsCard; }
 
-juce::Rectangle<int> MainView::getComingSoonCard() const
+juce::Rectangle<int> MainView::getQualityCard() const
 {
     return { readoutCard.getX(), knobsCard.getY(), readoutCard.getWidth(), knobsCard.getHeight() };
 }
@@ -139,7 +151,7 @@ void MainView::resized()
         return juce::Rectangle<int> (card.getRight() - 10 - HelpButton::size, card.getY() + 10, HelpButton::size, HelpButton::size);
     };
     controlsHelp.setBounds (helpAt (getKnobsCard()));
-    qualityHelp.setBounds (helpAt (getComingSoonCard()));
+    qualityHelp.setBounds (helpAt (getQualityCard()));
 
     // The four knobs, spread evenly across their card.
     const auto knobs = getKnobsCard();
@@ -152,12 +164,12 @@ void MainView::resized()
         knob->setBounds (size.withCentre ({ centerX, knobs.getCentreY() }));
     }
 
-    // Coming soon: Mode and Formant on the left, Tight on the right.
-    const auto soon = getComingSoonCard().reduced (space::lg, space::md);
+    // Quality: Mode and Formant on the left, Tight on the right.
+    const auto quality = getQualityCard().reduced (space::lg, space::md);
     const auto tightSize = tightKnob.getPreferredSize();
-    tightKnob.setBounds (tightSize.withPosition (soon.getRight() - tightSize.getWidth(), soon.getY() + 24));
+    tightKnob.setBounds (tightSize.withPosition (quality.getRight() - tightSize.getWidth(), quality.getY() + 24));
 
-    auto column = soon.withTrimmedTop (32).withRight (tightKnob.getX() - space::md);
+    auto column = quality.withTrimmedTop (32).withRight (tightKnob.getX() - space::md);
     auto modeSlot = column.removeFromTop (30).reduced (2);
     modeButtons[0].setBounds (modeSlot.removeFromLeft (modeSlot.getWidth() / 2 - 1));
     modeSlot.removeFromLeft (2);
@@ -171,27 +183,8 @@ void MainView::paint (juce::Graphics& g)
     g.fillAll (colors::background);
 
     drawCard (g, getKnobsCard().toFloat(), colors::panel);
-
-    // Coming soon: a dashed outline (not a solid card) says "not here yet".
-    const auto soon = getComingSoonCard().toFloat();
-    juce::Path outline;
-    outline.addRoundedRectangle (soon.reduced (0.5f), cornerRadius);
-    juce::Path dashed;
-    const float dashes[] = { 4.0f, 3.0f };
-    juce::PathStrokeType (1.0f).createDashedStroke (dashed, outline, dashes, 2);
-    g.setColour (colors::borderStrong);
-    g.fillPath (dashed);
-
-    auto top = soon.reduced ((float) space::lg, (float) space::md).removeFromTop (16.0f);
-    drawCaption (g, "QUALITY", top);
-
-    const auto pillFont = label (10.5f, Weight::bold);
-    const auto pillWidth = getTrackedTextWidth ("COMING SOON", pillFont, 0.12f) + 18.0f;
-    const auto pill = top.withRight ((float) qualityHelp.getX() - 6.0f).removeFromRight (pillWidth);
-    g.setColour (colors::borderStrong);
-    g.drawRoundedRectangle (pill.reduced (0.5f), pill.getHeight() * 0.5f, 1.0f);
-    g.setColour (colors::textMuted);
-    drawTrackedText (g, "COMING SOON", pillFont, 0.12f, pill, juce::Justification::centred);
+    drawCard (g, getQualityCard().toFloat(), colors::panel);
+    drawCaption (g, "QUALITY", getQualityCard().toFloat().reduced ((float) space::lg, (float) space::md).removeFromTop (16.0f));
 
     // The slot behind the Live / Studio segments.
     drawSegmentSlot (g, modeButtons[0].getBounds().getUnion (modeButtons[1].getBounds()).expanded (2).toFloat());

@@ -25,8 +25,9 @@ namespace lowchug
         |       [B] [Bb] [A] [Oct] [Cust] | spectrum + string markers |
         |                                 | * On target  -2.00 st 0 ct|
         +---------------------------------+---------------------------+
-        |  SHIFT   FINE   MIX   OUTPUT    | QUALITY      COMING SOON  |
-        |   (o)    (o)    (o)    (o)      | [LIVE|STUDIO] [FORMANT] (o)|
+        |  SHIFT   FINE   MIX   OUTPUT    | QUALITY                   |
+        |   (o)    (o)    (o)    (o)      | [LIVE|STUDIO]  TIGHT (o)  |
+        |                                 | [  FORMANT  ]             |
         +---------------------------------+---------------------------+
 */
 class MainView final : public juce::Component
@@ -43,10 +44,14 @@ public:
     HeaderBar& getHeader() noexcept { return header; }
     ReadoutPanel& getReadoutPanel() noexcept { return readout; }
     UserSlider& getShiftSlider() noexcept { return shiftKnob.getSlider(); }
+    juce::TextButton& getModeButton (int index) noexcept { return modeButtons[(size_t) index]; }
+    juce::TextButton& getFormantButton() noexcept { return formantButton; }
+    LabeledKnob& getTightKnob() noexcept { return tightKnob; }
+    void showAboutPanel (bool show) { showAbout (show); }
 
 private:
     juce::Rectangle<int> getKnobsCard() const;
-    juce::Rectangle<int> getComingSoonCard() const;
+    juce::Rectangle<int> getQualityCard() const;
     void showAbout (bool);
 
     LowChugProcessor& processor;
@@ -61,8 +66,8 @@ private:
 
     LabeledKnob shiftKnob, fineKnob, mixKnob, outputKnob;
 
-    // Coming soon (milestone 3): attached to their parameters already, so
-    // they show the saved values, but disabled.
+    // Quality: Live / Studio (two segments driving one choice parameter),
+    // Formant (a toggle) and Tight (a small knob).
     std::array<juce::TextButton, 2> modeButtons;
     juce::ParameterAttachment modeAttachment;
     juce::TextButton formantButton { "Formant" };

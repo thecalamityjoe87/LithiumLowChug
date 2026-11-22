@@ -13,13 +13,16 @@ constexpr const char* noteNames[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G",
 constexpr int standardStrings[] = { 40, 45, 50, 55, 59, 64 }; // E2 A2 D3 G3 B3 E4
 constexpr int dropDStrings[] = { 38, 45, 50, 55, 59, 64 };
 
+// Within this many cents counts as in tune (the shaded zone, cyan).
+constexpr float inTuneCents = 3.0f;
+
 // How long a note stays on screen after the string stops (updates at 30 Hz).
 constexpr int holdUpdates = 20;
 
 juce::Colour colorForCents (float cents)
 {
     const auto size = std::abs (cents);
-    return size <= 3.0f ? colors::accent : (size <= 15.0f ? colors::caution : colors::warning);
+    return size <= inTuneCents ? colors::accent : (size <= 15.0f ? colors::caution : colors::warning);
 }
 } // namespace
 
@@ -102,7 +105,7 @@ void TunerView::paint (juce::Graphics& g)
     const auto nearest = juce::roundToInt (shownNote);
     const auto cents = (shownNote - (float) nearest) * 100.0f;
     const auto meterColor = hasPitch ? colorForCents (cents) : colors::textMuted;
-    const auto inTune = hasPitch && std::abs (cents) <= 3.0f;
+    const auto inTune = hasPitch && std::abs (cents) <= inTuneCents;
 
     // The note, big, with its octave.
     auto noteRow = area.removeFromTop (66.0f);
@@ -110,14 +113,17 @@ void TunerView::paint (juce::Graphics& g)
     {
         const auto name = juce::String (noteNames[((nearest % 12) + 12) % 12]);
         const auto nameFont = label (64.0f, Weight::semibold);
+        // The letter is centered over the scale's 0; the octave hangs off
+        // its right side, so it doesn't pull the letter off center.
         const auto width = juce::GlyphArrangement::getStringWidth (nameFont, name);
-        auto box = noteRow.withSizeKeepingCentre (width + 20.0f, noteRow.getHeight());
+        const auto letter = noteRow.withSizeKeepingCentre (width, noteRow.getHeight());
         g.setColour (inTune ? colors::accent : colors::text);
         g.setFont (nameFont);
-        g.drawText (name, box.removeFromLeft (width), juce::Justification::centredLeft, false);
+        g.drawText (name, letter, juce::Justification::centred, false);
         g.setColour (colors::textMuted);
         g.setFont (mono (14.0f));
-        g.drawText (juce::String (nearest / 12 - 1), box.withTrimmedTop (30.0f), juce::Justification::centredLeft, false);
+        g.drawText (juce::String (nearest / 12 - 1), letter.withX (letter.getRight() + 1.0f).withWidth (20.0f).withTrimmedTop (30.0f),
+                    juce::Justification::centredLeft, false);
     }
     else
     {
@@ -126,43 +132,72 @@ void TunerView::paint (juce::Graphics& g)
         g.drawText ("Play one string", noteRow, juce::Justification::centred, false);
     }
 
-    // The meter: -50 .. +50 cents, ticks every 10, the needle a dot.
+    // The scale, as on Lithium Studio's tuner: 50 cents flat (left) to 50
+    // sharp (right), tall ticks at the ends and short ones every 10 cents,
+    // the in-tune zone shaded in the middle, and the needle a bar with a
+    // soft glow.
     area.removeFromTop (6.0f);
-    auto meter = area.removeFromTop (30.0f).reduced (8.0f, 0.0f);
-    const auto y = meter.getCentreY() + 2.0f;
-    const auto xFor = [&] (float c) { return meter.getCentreX() + c / 50.0f * meter.getWidth() * 0.5f; };
+    auto scale = area.removeFromTop (30.0f).reduced (8.0f, 0.0f);
+    const auto midY = scale.getCentreY();
+    const auto xFor = [&] (float c) { return scale.getCentreX() + juce::jlimit (-50.0f, 50.0f, c) / 50.0f * scale.getWidth() * 0.5f; };
 
-    g.setColour (colors::border);
-    g.drawLine (meter.getX(), y, meter.getRight(), y, 2.0f);
     for (int c = -50; c <= 50; c += 10)
     {
-        g.setColour (c == 0 ? colors::textMuted : colors::knobTicks);
-        g.drawLine (xFor ((float) c), y - (c == 0 ? 10.0f : 5.0f), xFor ((float) c), y + 5.0f, c == 0 ? 2.0f : 1.5f);
-    }
-    if (hasPitch)
-    {
-        const auto x = xFor (juce::jlimit (-50.0f, 50.0f, cents));
-        g.setColour (meterColor.withAlpha (0.25f));
-        g.fillEllipse (juce::Rectangle<float> (20.0f, 20.0f).withCentre ({ x, y }));
-        g.setColour (meterColor);
-        g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre ({ x, y }));
+        if (c == 0)
+            continue; // the in-tune zone marks the middle
+        const auto end = std::abs (c) == 50;
+        g.setColour (colors::textMuted.withAlpha (end ? 0.8f : 0.45f));
+        g.fillRect (juce::Rectangle<float> (end ? 1.5f : 1.0f, end ? 13.0f : 6.0f).withCentre ({ xFor ((float) c), midY }));
     }
 
-    // -50   +4 ct · 82.6 Hz   +50
-    area.removeFromTop (4.0f);
-    auto readout = area.removeFromTop (16.0f);
-    g.setFont (mono (11.5f));
-    g.setColour (colors::textMuted);
-    g.drawText ("-50", readout, juce::Justification::centredLeft, false);
-    g.drawText ("+50", readout, juce::Justification::centredRight, false);
+    const auto zone = juce::Rectangle<float> (xFor (inTuneCents) - xFor (-inTuneCents) + 4.0f, 19.0f).withCentre ({ scale.getCentreX(), midY });
+    g.setColour (colors::accent.withAlpha (0.2f));
+    g.fillRoundedRectangle (zone, 2.0f);
+    g.setColour (colors::accent.withAlpha (0.35f));
+    g.fillRect (juce::Rectangle<float> (1.0f, zone.getHeight() - 4.0f).withCentre (zone.getCentre()));
+
     if (hasPitch)
     {
-        const auto hz = 440.0f * std::exp2 ((shownNote - 69.0f) / 12.0f);
-        const auto rounded = juce::roundToInt (cents);
+        const auto needle = juce::Rectangle<float> (3.0f, 21.0f).withCentre ({ xFor (cents), midY });
+        g.setColour (meterColor.withAlpha (0.25f));
+        g.fillRoundedRectangle (needle.expanded (2.0f, 1.0f), 2.5f);
         g.setColour (meterColor);
-        g.drawText ((rounded > 0 ? "+" : "") + juce::String (rounded) + " ct" + juce::String::fromUTF8 (" \xc2\xb7 ")
-                        + juce::String (hz, 1) + " Hz",
-                    readout, juce::Justification::centred, false);
+        g.fillRoundedRectangle (needle, 1.5f);
+    }
+
+    // Under the scale: flat, 0, sharp. The side the note is off lights up.
+    // (The signs are drawn: the fonts haven't got them.)
+    area.removeFromTop (2.0f);
+    const auto captions = area.removeFromTop (16.0f).reduced (8.0f, 0.0f);
+    const auto signY = captions.getCentreY();
+    const auto flat = hasPitch && ! inTune && cents < 0.0f;
+    const auto sharp = hasPitch && ! inTune && cents > 0.0f;
+
+    g.setColour (colors::textMuted);
+    g.setFont (label (type::caption, Weight::semibold));
+    g.drawText ("0", juce::Rectangle<float> (20.0f, captions.getHeight()).withCentre ({ scale.getCentreX() + 0.5f, signY }),
+                juce::Justification::centred, false);
+
+    {
+        // A flat: a stem with a rounded bowl at its foot.
+        juce::Path p;
+        const auto x = captions.getX() + 1.0f, top = signY - 6.5f, bottom = signY + 5.0f;
+        p.startNewSubPath (x, top);
+        p.lineTo (x, bottom);
+        p.cubicTo (x + 6.5f, bottom - 2.0f, x + 6.5f, bottom - 7.0f, x, bottom - 4.0f);
+        g.setColour (flat ? colors::text : colors::textMuted);
+        g.strokePath (p, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+    {
+        // A sharp: two upright strokes crossed by two rising bars.
+        juce::Path p;
+        const auto x = captions.getRight() - 9.0f;
+        p.startNewSubPath (x + 2.5f, signY - 5.5f);  p.lineTo (x + 2.5f, signY + 6.0f);
+        p.startNewSubPath (x + 6.5f, signY - 6.5f);  p.lineTo (x + 6.5f, signY + 5.0f);
+        p.startNewSubPath (x, signY - 1.0f);         p.lineTo (x + 9.0f, signY - 3.0f);
+        p.startNewSubPath (x, signY + 3.0f);         p.lineTo (x + 9.0f, signY + 1.0f);
+        g.setColour (sharp ? colors::text : colors::textMuted);
+        g.strokePath (p, juce::PathStrokeType (1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
     // The strings of your tuning; the one being played lights up.

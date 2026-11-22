@@ -139,10 +139,6 @@ void InfoButton::paintButton (juce::Graphics& g, bool isMouseOver, bool isDown)
 }
 
 //==============================================================================
-namespace
-{
-/** Where call-outs go: the main view (the editor's child, which the editor
-    scales as a whole), so they scale with the rest of the UI. */
 juce::Component* findOverlayParent (juce::Component& c)
 {
     for (auto* p = &c; p != nullptr; p = p->getParentComponent())
@@ -151,6 +147,8 @@ juce::Component* findOverlayParent (juce::Component& c)
     return c.getTopLevelComponent();
 }
 
+namespace
+{
 /** A "?" in a ring, centered by its ink: a font's text box has room for
     ascenders and descenders, which would leave the mark sitting high. */
 void drawHelpMark (juce::Graphics& g, juce::Rectangle<float> ring, bool highlighted)

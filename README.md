@@ -10,11 +10,11 @@ Formats: VST3, LV2 and Standalone on Linux/Windows/macOS, plus AU on macOS. Made
 |---|---|
 | 1. Skeleton and engine evaluation | done: see [docs/engine-evaluation.md](docs/engine-evaluation.md) |
 | 2. Core DSP | done |
-| 3. Quality features (modes, formants, transients, tight) | next |
+| 3. Quality features (modes, formants, transients, tight) | done: see the milestone 3 section of the engine evaluation |
 | 4. UI and presets | done (ahead of 3, so the plugin could be play-tested): UI, factory presets, tuner |
-| 5. Hardening (pluginval, hosts, profiling) | |
+| 5. Hardening (pluginval, hosts, profiling) | next |
 
-The plugin shifts pitch with the Live engine (1024 samples, 21.3 ms of latency at 48 kHz). Working controls: Playing in, Hear, Shift, Fine, Mix, Output and Bypass. Mode, Formant and Tight exist as parameters but do nothing until milestone 3; the editor shows them as "coming soon", and the Studio presets sound like their Live versions until then.
+Two modes, switched with the Live | Studio buttons or the presets. Live has 1024 samples (21.3 ms) of latency at 48 kHz, for playing through; Studio has 2304 samples (48.0 ms) and the cleanest low end, for recording and mixing. Hosts are told the new latency when you switch, and the sound crossfades once the other engine has warmed up (about a quarter of a second). Formant keeps the guitar's tone in place as the pitch drops (off is the classic pitch pedal sound); Tight is a gentle low cut that follows the shift.
 
 The editor (src/ui) has the Lithium family look (Lithium Drums' colors, fonts and knob). You pick how your guitar is tuned with the Playing in buttons and the tuning you want with the "Tune down to" dial, whose notches are the tunings reachable from yours; each card has a "?" that explains it. The header's preset box holds the factory presets (Eb, D, C#, C and B Standard, Drop C, B and A, Octave Down, each in a Live and a Studio version; hosts list the same 18 as programs); the name gets a "*" once you change a setting it covers. The right card has two tabs. TUNER tunes the guitar itself (before the shift) to the tuning you play in. YOU HEAR includes a visualizer: input and output spectra with the open strings of the tuning you hear marked, and the shift actually measured between input and output (it compares the two spectra on a log-frequency axis, so it works on chords), with how many cents it is from what the controls ask for.
 
@@ -63,7 +63,7 @@ cmake/              PluginIdentity.cmake (names, codes, IDs), Dependencies.cmake
 src/dsp/            plugin-independent DSP (plain C++, no JUCE)
   Detuner.h             the complete effect: engine, dry delay, glide, mix, gain, bypass
   PitchShiftEngine.h    the swappable engine interface
-  EngineConfigs.h       the Live and Studio engine settings
+  EngineConfigs.h       the Live and Studio engine settings (Detuner holds one engine of each)
   engines/              PhaseVocoderEngine (chosen), SignalsmithEngine, GranularEngine (reference)
 src/plugin/         JUCE wrapper: processor, parameters, tuning model, analysis tap, standalone audio setup
 src/ui/             the editor: Lithium look and feel, panels, tuning sync (TuningController), shift analyzer
@@ -97,6 +97,8 @@ Everything is set in `cmake/PluginIdentity.cmake`. **Don't change the codes afte
 - MIDI control beyond host automation.
 
 ## Licenses
+
+Lithium LowChug is free software under the GNU Affero General Public License, version 3 ([LICENSE](LICENSE)), like Lithium Drums.
 
 - JUCE 8+ is dual-licensed: AGPLv3, or a commercial JUCE license. Distributing LowChug binaries requires one or the other.
 - Signalsmith Stretch and Signalsmith Linear are MIT licensed.

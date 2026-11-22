@@ -9,7 +9,10 @@
 // so the engines can be compared by ear.
 //
 // Usage:
-//   lowchug-engine-eval [--out DIR] [--input di.wav] [--audio none|key|all] [--quick]
+//   lowchug-engine-eval [--out DIR] [--input di.wav] [--audio none|key|all] [--engines full|quick|shipping]
+//
+// --engines shipping runs just the configurations in src/dsp/EngineConfigs.h
+// (and whatever variants are being compared against them).
 //
 // With --input, your own DI recording is also rendered through every engine
 // at the key shifts (no objective scores: there is no ground truth for it).
@@ -18,6 +21,7 @@
 #include "TestSignals.h"
 #include "WavFile.h"
 
+#include "dsp/EngineConfigs.h"
 #include "dsp/engines/GranularEngine.h"
 #include "dsp/engines/PhaseVocoderEngine.h"
 #include "dsp/engines/SignalsmithEngine.h"
@@ -33,6 +37,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace lowchug;
@@ -52,8 +57,9 @@ struct EngineSpec
     std::function<std::unique_ptr<dsp::PitchShiftEngine>()> make;
 };
 
-std::vector<EngineSpec> makeEngineList (bool quick)
+std::vector<EngineSpec> makeEngineList (const std::string& set)
 {
+    const bool quick = set == "quick";
     using SS = dsp::SignalsmithEngine;
     using PV = dsp::PhaseVocoderEngine;
     std::vector<EngineSpec> list;
@@ -64,6 +70,25 @@ std::vector<EngineSpec> makeEngineList (bool quick)
     auto pv = [&] (int size, int overlap, bool transientReset = true, int synthesisSize = 0) {
         list.push_back ({ "PV", [=] { return std::make_unique<PV> (PV::Config { size, overlap, transientReset, 6.0f, synthesisSize }); } });
     };
+
+    auto pvConfig = [&] (PV::Config config) {
+        list.push_back ({ "PV", [=] { return std::make_unique<PV> (config); } });
+    };
+
+    if (set == "shipping")
+    {
+        // The shipping configs, and each without the partial model (how
+        // milestone 1 shipped) for comparison.
+        for (auto base : { dsp::configs::live(), dsp::configs::studio() })
+            for (auto [model, mask] : { std::pair { false, false }, std::pair { true, true } })
+            {
+                auto c = base;
+                c.partialModel = model;
+                c.onsetMask = mask;
+                pvConfig (c);
+            }
+        return list;
+    }
 
     list.push_back ({ "reference", [] { return std::make_unique<dsp::GranularEngine> (dsp::GranularEngine::Config { 30.0f }); } });
 
@@ -186,11 +211,12 @@ struct EngineReport
 {
     std::string name, role;
     double reportedLatencyMs = 0, measuredLatencyMs = 0, impulseLatencyMs = 0;
-    double cpuMono = 0, cpuStereo = 0, worstBlock = 0;
+    double cpuMono = 0, cpuStereo = 0, worstBlock = 0, worstBlock64 = 0, worstBlock32 = 0;
     double maxCentsError = 0, maxRippleDb = 0;
     double variableBlockDiff = 0;
     std::map<std::string, double> lsdByGroup;   // averaged over the key shifts
     std::map<int, double> lsdByShift;           // whole corpus
+    std::map<int, double> residueByShift;       // steady treble residue on a low chord, dB re signal
     double hnrLowE7 = 0, hnrLowD5 = 0, fundLossLowE7 = 0, fundLossLowD5 = 0;
     TransientStats transients;                  // chug segments at -5
 };
@@ -202,7 +228,7 @@ int main (int argc, char** argv)
     fs::path outDir = "engine-eval-out";
     std::string userInput;
     std::string audioMode = "key";
-    bool quick = false;
+    std::string engineSet = "full";
 
     for (int i = 1; i < argc; ++i)
     {
@@ -214,10 +240,12 @@ int main (int argc, char** argv)
         else if (arg == "--audio" && i + 1 < argc)
             audioMode = argv[++i];
         else if (arg == "--quick")
-            quick = true;
+            engineSet = "quick";
+        else if (arg == "--engines" && i + 1 < argc)
+            engineSet = argv[++i];
         else
         {
-            std::fprintf (stderr, "usage: %s [--out DIR] [--input di.wav] [--audio none|key|all] [--quick]\n", argv[0]);
+            std::fprintf (stderr, "usage: %s [--out DIR] [--input di.wav] [--audio none|key|all] [--engines full|quick|shipping]\n", argv[0]);
             return 1;
         }
     }
@@ -268,7 +296,27 @@ int main (int argc, char** argv)
 
     // ---- Run every engine ------------------------------------------------
     std::vector<EngineReport> reports;
-    for (const auto& spec : makeEngineList (quick))
+    // A low power chord of pure sines: nothing above 2 kHz, so whatever an
+    // engine puts up there is its own residue.
+    Signal lowChord ((size_t) (3.0 * sampleRate));
+    for (size_t i = 0; i < lowChord.size(); ++i)
+    {
+        const double t = (double) i / sampleRate;
+        lowChord[i] = float (0.25 * (std::sin (2 * std::numbers::pi * 82.41 * t) + std::sin (2 * std::numbers::pi * 123.47 * t)
+                                     + std::sin (2 * std::numbers::pi * 164.81 * t)));
+    }
+    auto residueDb = [] (const Signal& out) {
+        const auto high = highPass (out, 2000.0, sampleRate);
+        double h = 0, all = 0;
+        for (size_t i = (size_t) (1.0 * sampleRate); i < (size_t) (2.8 * sampleRate); ++i)
+        {
+            h += (double) high[i] * high[i];
+            all += (double) out[i] * out[i];
+        }
+        return 10.0 * std::log10 (h / all + 1e-30);
+    };
+
+    for (const auto& spec : makeEngineList (engineSet))
     {
         auto engine = spec.make();
         EngineReport report;
@@ -331,6 +379,7 @@ int main (int argc, char** argv)
                     }
             }
 
+            report.residueByShift[shift] = residueDb (runEngine (*engine, lowChord, ratio, 1, fixedBlocks (hostBlockSize)).aligned);
             report.lsdByShift[shift] = logSpectralDistance (run.aligned, reference, 0.0, corpus.length, sampleRate);
 
             if (isKeyShift (shift))
@@ -382,6 +431,14 @@ int main (int argc, char** argv)
             report.lsdByGroup[group] = sum / groupCounts[group];
         report.lsdByGroup["all"] = lsdKeySum / (double) keyShifts.size();
 
+        // Small host buffers: the worst block is what causes dropouts.
+        report.worstBlock64 = report.worstBlock32 = 1e9;
+        for (int repeat = 0; repeat < 3; ++repeat)
+        {
+            report.worstBlock64 = std::min (report.worstBlock64, runEngine (*engine, dry, semitonesToRatio (-5), 1, fixedBlocks (64)).worstBlockPercent);
+            report.worstBlock32 = std::min (report.worstBlock32, runEngine (*engine, dry, semitonesToRatio (-5), 1, fixedBlocks (32)).worstBlockPercent);
+        }
+
         // Stereo cost (both channels carry signal, no mono shortcut).
         report.cpuStereo = 1e9;
         for (int repeat = 0; repeat < 3; ++repeat)
@@ -414,13 +471,14 @@ int main (int argc, char** argv)
        << "Corpus: synthetic DI (" << fmt ("%.1f", corpus.length) << " s), scored against an ideal shifted rendering.\n\n";
 
     md << "## Latency and CPU\n\n"
-       << "| Engine | Reported latency | Impulse (0 st) | Envelope (-5 st) | CPU mono | CPU stereo | Worst block | Variable-block diff |\n"
+       << "| Engine | Reported latency | Impulse (0 st) | Envelope (-5 st) | CPU mono | CPU stereo | Worst block 128 / 64 / 32 | Variable-block diff |\n"
        << "|---|---|---|---|---|---|---|---|\n";
     for (const auto& r : reports)
         md << "| " << r.name << " | " << fmt ("%.1f ms", r.reportedLatencyMs) << " | " << fmt ("%.1f ms", r.impulseLatencyMs)
            << " | " << fmt ("%.1f ms", r.measuredLatencyMs)
            << " | " << fmt ("%.2f%%", r.cpuMono) << " | " << fmt ("%.2f%%", r.cpuStereo) << " | "
-           << fmt ("%.0f%%", r.worstBlock) << " | " << fmt ("%.1e", r.variableBlockDiff) << " |\n";
+           << fmt ("%.0f%%", r.worstBlock) << " / " << fmt ("%.0f%%", r.worstBlock64) << " / " << fmt ("%.0f%%", r.worstBlock32)
+           << " | " << fmt ("%.1e", r.variableBlockDiff) << " |\n";
 
     md << "\nImpulse latency is exact; the envelope measure (onset cross-correlation on shifted material) is approximate. "
        << "Variable-block diff = peak difference between 128-sample and random 1-512-sample host blocks (0 = buffer-size independent).\n"
@@ -453,6 +511,21 @@ int main (int argc, char** argv)
         md << "| " << r.name << " |";
         for (int s : shifts)
             md << " " << fmt ("%.2f", r.lsdByShift.at (s)) << " |";
+        md << "\n";
+    }
+
+    md << "\n### Treble residue per shift (dB above 2 kHz re signal, low sine chord, lower = cleaner)\n\n| Engine |";
+    for (int s : shifts)
+        md << " " << s << " st |";
+    md << "\n|---|";
+    for (size_t i = 0; i < shifts.size(); ++i)
+        md << "---|";
+    md << "\n";
+    for (const auto& r : reports)
+    {
+        md << "| " << r.name << " |";
+        for (int s : shifts)
+            md << " " << fmt ("%.1f", r.residueByShift.at (s)) << " |";
         md << "\n";
     }
 

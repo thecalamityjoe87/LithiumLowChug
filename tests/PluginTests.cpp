@@ -153,13 +153,32 @@ public:
                 expect (p.getState().getParameter (id) != nullptr, id);
         }
 
-        beginTest ("Reports the engine latency");
+        beginTest ("Reports the engine latency in both modes");
         {
             LowChugProcessor p;
+            p.setRateAndBufferSizeDetails (48000.0, 512);
             p.prepareToPlay (48000.0, 512);
             expectEquals (p.getLatencySamples(), 1024);
+            setParam (p, params::mode, 1.0f); // on the message thread: reported at once
+            expectEquals (p.getLatencySamples(), 2304);
+            setParam (p, params::mode, 0.0f);
+            expectEquals (p.getLatencySamples(), 1024);
+
+            p.setRateAndBufferSizeDetails (96000.0, 256);
             p.prepareToPlay (96000.0, 256); // hosts re-prepare on rate changes
             expectEquals (p.getLatencySamples(), 2048);
+            setParam (p, params::mode, 1.0f);
+            expectEquals (p.getLatencySamples(), 4608);
+        }
+
+        beginTest ("Studio mode: no shift is bit-identical to the input delayed by the Studio latency");
+        {
+            LowChugProcessor p;
+            setParam (p, params::mode, 1.0f);
+            setParam (p, params::sourceTuning, (float) tunings::Source::custom);
+            setParam (p, params::shift, 0.0f);
+            expectSampleExactDelay (p, false);
+            expectEquals (p.getLatencySamples(), 2304);
         }
 
         beginTest ("Effective shift follows Playing in / Hear, or the shift knob when Custom");
@@ -323,19 +342,63 @@ public:
             expectEquals (q.getCurrentProgram(), 14);
         }
 
-        beginTest ("A host switching programs from another thread is applied on the message thread");
+        beginTest ("Studio presets select the Studio engine and report its latency; Live presets the Live one");
         {
             LowChugProcessor p;
+            p.setRateAndBufferSizeDetails (48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+            for (int program = 0; program < presets::numPresets; ++program)
+            {
+                p.setCurrentProgram (program);
+                expectEquals (p.getLatencySamples(), presets::isStudio (program) ? 2304 : 1024, p.getProgramName (program));
+            }
+
+            // And a session saved in Studio reopens in Studio (prepare reads the mode).
+            p.setCurrentProgram (9 + 3); // C Standard (Studio)
+            juce::MemoryBlock saved;
+            p.getStateInformation (saved);
+            LowChugProcessor q;
+            q.setStateInformation (saved.getData(), (int) saved.getSize());
+            q.setRateAndBufferSizeDetails (48000.0, 512);
+            q.prepareToPlay (48000.0, 512);
+            expectEquals (q.getLatencySamples(), 2304);
+        }
+
+        beginTest ("Changes from other threads: a program switch is applied on the message thread, "
+                   "and mode automation reaches the host latency via the timer");
+        {
+            // JUCE's message loop can only be run once per process (stopping
+            // it is permanent), so both cross-thread checks share one run,
+            // chained with callAsync / callAfterDelay.
+            LowChugProcessor p;
+            p.setRateAndBufferSizeDetails (48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+
             std::thread host ([&p] { p.setCurrentProgram (7); }); // Drop A (Live)
             host.join();
             expectEquals (p.getCurrentProgram(), 7);
-            // Run the message loop until a "stop" posted now: messages are
-            // handled in order, so the AsyncUpdater's (posted by the host
-            // thread above) is handled first.
-            juce::MessageManager::callAsync ([] { juce::MessageManager::getInstance()->stopDispatchLoop(); });
+
+            // Messages are handled in order, so the AsyncUpdater's (posted by
+            // the host thread above) is handled before this.
+            juce::MessageManager::callAsync ([this, &p]
+            {
+                auto* target = p.getState().getParameter (params::targetTuning);
+                expectEquals (juce::roundToInt (target->convertFrom0to1 (target->getValue())), TuningsTests::indexOf ("Drop A"));
+
+                // Now automation switches to Studio from the audio thread:
+                // the latency must not be reported from there...
+                std::thread audio ([&p] { setParam (p, params::mode, 1.0f); });
+                audio.join();
+                expectEquals (p.getLatencySamples(), 1024, "not reported from the audio thread itself");
+
+                // ...but the 10 Hz timer reports it shortly after.
+                juce::Timer::callAfterDelay (300, [this, &p]
+                {
+                    expectEquals (p.getLatencySamples(), 2304);
+                    juce::MessageManager::getInstance()->stopDispatchLoop();
+                });
+            });
             juce::MessageManager::getInstance()->runDispatchLoop();
-            auto* target = p.getState().getParameter (params::targetTuning);
-            expectEquals (juce::roundToInt (target->convertFrom0to1 (target->getValue())), TuningsTests::indexOf ("Drop A"));
         }
 
         beginTest ("Garbage state is ignored");
@@ -401,6 +464,49 @@ public:
             logMessage ("    measured " + juce::String (r.measuredSemitones, 3) + " st, confidence " + juce::String (r.confidence, 2));
             expectWithinAbsoluteError (r.measuredSemitones, shift, 0.02f); // 2 cents
         }
+
+        // Through the real processor, in both modes: the analyzer lines the
+        // input up with the output using the REPORTED latency, so this also
+        // checks that the reported latency is what the audio really does.
+        const int standard[] = { 40, 45, 50, 55, 59, 64 };
+        for (const auto mode : { 0.0f, 1.0f })
+            for (const int shift : { -2, -5, -7 })
+            {
+                beginTest (juce::String (mode > 0.5f ? "Studio" : "Live") + ": a chord through the processor measures "
+                           + juce::String (shift) + " st within 2 cents");
+                LowChugProcessor p;
+                auto set = [&p] (const char* id, float v) {
+                    auto* param = p.getState().getParameter (id);
+                    param->setValueNotifyingHost (param->convertTo0to1 (v));
+                };
+                set (params::mode, mode);
+                set (params::sourceTuning, (float) tunings::Source::custom);
+                set (params::shift, (float) shift);
+                p.setRateAndBufferSizeDetails (48000.0, 256);
+                p.prepareToPlay (48000.0, 256);
+
+                ShiftAnalyzer analyzer;
+                analyzer.prepare (48000.0);
+                juce::AudioBuffer<float> block (2, 256);
+                std::vector<float> in (256), out (256);
+                juce::MidiBuffer midi;
+                ShiftAnalyzer::Result r;
+                for (int pos = 0; pos < 72000; pos += 256)
+                {
+                    for (int i = 0; i < 256; ++i)
+                        in[(size_t) i] = chordSample (standard, 6, 0.0f, pos + i, 48000.0);
+                    block.copyFrom (0, 0, in.data(), 256);
+                    block.copyFrom (1, 0, in.data(), 256);
+                    p.processBlock (block, midi);
+                    std::copy (block.getReadPointer (0), block.getReadPointer (0) + 256, out.begin());
+                    analyzer.push (in.data(), out.data(), 256);
+                    if (pos % 1536 == 0)
+                        r = analyzer.update (p.getLatencySamples(), p.getEffectiveShift());
+                }
+                expect (r.state == ShiftAnalyzer::Result::State::measured, "should have measured a shift");
+                logMessage ("    measured " + juce::String (r.measuredSemitones, 4) + " st, confidence " + juce::String (r.confidence, 2));
+                expectWithinAbsoluteError (r.measuredSemitones, (float) shift, 0.02f);
+            }
 
         beginTest ("Silence is reported as silence");
         {
@@ -589,6 +695,83 @@ public:
             editor->getMainView().getTuningPanel().getDial().step (-1);
             bar.refresh();
             expect (bar.getShownName().endsWith ("*"), "an edited preset is marked");
+            expectEquals (bar.getShownDetail(), juce::String::fromUTF8 ("Studio \xc2\xb7 play in Standard"));
+        }
+
+        beginTest ("The preset panel lists Live and Studio presets and loads the one chosen");
+        {
+            LowChugProcessor p;
+            prepare (p);
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& bar = editor->getMainView().getHeader().getPresetBar();
+            auto panel = bar.createPanel();
+            panel->resized();
+
+            // One row per preset, each a button titled with the preset's full name.
+            juce::Button* dropA = nullptr;
+            int rows = 0;
+            for (auto* child : panel->getChildren())
+                if (auto* row = dynamic_cast<juce::Button*> (child))
+                {
+                    ++rows;
+                    if (row->getTitle() == "Drop A (Studio)")
+                        dropA = row;
+                    if (row->getTitle() == "D Standard (Live)")
+                        expect (row->getToggleState(), "the loaded preset is marked");
+                }
+            expectEquals (rows, presets::numPresets);
+            expect (dropA != nullptr);
+            if (dropA != nullptr)
+                dropA->onClick();
+            expectEquals (p.getCurrentProgram(), 9 + 7);
+            expectEquals (p.getLatencySamples(), 2304);
+            expectEquals (bar.getShownName(), juce::String ("Drop A"));
+            expectEquals (bar.getShownDetail(), juce::String::fromUTF8 ("Studio \xc2\xb7 play in Drop D"));
+        }
+
+        beginTest ("Quality controls work: Live / Studio, Formant and Tight drive their parameters");
+        {
+            LowChugProcessor p;
+            prepare (p);
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& view = editor->getMainView();
+
+            expect (view.getModeButton (0).isEnabled() && view.getModeButton (1).isEnabled());
+            expect (view.getFormantButton().isEnabled() && view.getTightKnob().isEnabled());
+            expect (view.getModeButton (0).getToggleState() && ! view.getModeButton (1).getToggleState(), "Live lit");
+
+            view.getModeButton (1).onClick(); // what clicking the Studio segment runs
+            expectWithinAbsoluteError (plain (p, params::mode), 1.0f, 1.0e-4f);
+            expect (view.getModeButton (1).getToggleState() && ! view.getModeButton (0).getToggleState(), "Studio lit");
+            expectEquals (p.getLatencySamples(), 2304);
+            view.getHeader().getPresetBar().refresh(); // (its timer does this ten times a second)
+            expect (view.getHeader().getPresetBar().getShownName().endsWith ("*"), "mode differs from the Live preset: edited");
+
+            view.getFormantButton().setToggleState (true, juce::sendNotificationSync); // what a click does
+            expectWithinAbsoluteError (plain (p, params::formant), 1.0f, 1.0e-4f);
+
+            view.getTightKnob().getSlider().setValue (40.0, juce::sendNotificationSync);
+            expectWithinAbsoluteError (plain (p, params::tight), 40.0f, 0.1f);
+
+            // Automation moves them back: the controls follow.
+            auto* mode = p.getState().getParameter (params::mode);
+            mode->setValueNotifyingHost (mode->convertTo0to1 (0.0f));
+            expect (view.getModeButton (0).getToggleState() && ! view.getModeButton (1).getToggleState(), "Live lit again");
+
+            saveSnapshot (*editor, "lowchug-quality-1x", 1.0f);
+            view.showAboutPanel (true);
+            saveSnapshot (*editor, "lowchug-about-1x", 1.0f);
+        }
+
+        beginTest ("The preset menu's column headers show each mode's latency");
+        {
+            LowChugProcessor p;
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& bar = editor->getMainView().getHeader().getPresetBar();
+            expectEquals (bar.getMenuHeader (params::Mode::live), juce::String ("LIVE"), "not prepared yet: no rate, no number");
+            prepare (p);
+            expectEquals (bar.getMenuHeader (params::Mode::live), juce::String::fromUTF8 ("LIVE \xc2\xb7 21 ms"));
+            expectEquals (bar.getMenuHeader (params::Mode::studio), juce::String::fromUTF8 ("STUDIO \xc2\xb7 48 ms"));
         }
 
         beginTest ("The tuner reads the string being played (before the shift)");

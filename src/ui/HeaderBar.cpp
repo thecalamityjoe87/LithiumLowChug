@@ -108,7 +108,7 @@ void HeaderBar::resized()
     const auto left = juce::roundToInt (getWordmarkRight()) + theme::space::lg;
     const auto right = juce::roundToInt (latencyArea.getX()) - theme::space::lg;
     const auto width = std::min (PresetBar::idealWidth, right - left);
-    presetBar.setBounds (left + (right - left - width) / 2, (getHeight() - 32) / 2, width, 32);
+    presetBar.setBounds (left + (right - left - width) / 2, (getHeight() - PresetBar::idealHeight) / 2, width, PresetBar::idealHeight);
 }
 
 } // namespace lowchug

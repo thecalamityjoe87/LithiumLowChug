@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AnalysisTap.h"
+#include "Parameters.h"
 #include "dsp/Detuner.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -22,11 +23,13 @@ namespace lowchug
         the UI or host automation writes it.
 */
 class LowChugProcessor final : public juce::AudioProcessor,
-                               private juce::AsyncUpdater
+                               private juce::AsyncUpdater,
+                               private juce::AudioProcessorValueTreeState::Listener,
+                               private juce::Timer
 {
 public:
     LowChugProcessor();
-    ~LowChugProcessor() override = default;
+    ~LowChugProcessor() override;
 
     // Lifecycle -----------------------------------------------------------
     void prepareToPlay (double sampleRate, int maximumExpectedSamplesPerBlock) override;
@@ -83,11 +86,26 @@ public:
     /** Copies of the audio for the editor's visualizer (see AnalysisTap). */
     AnalysisTap& getAnalysisTap() noexcept { return analysisTap; }
 
+    /** The latency each mode has at the current sample rate (0 before the
+        host has prepared us). Message thread. */
+    int getLatencySamplesFor (params::Mode) const;
+
+    /** Tells the host the latency of the mode the Mode parameter selects, if
+        it changed. Message thread only (see the .cpp for why); the
+        processor calls it itself whenever the mode changes. */
+    void updateReportedLatency();
+
 private:
     static BusesProperties makeBuses();
 
     // Applies a preset on the message thread (see setCurrentProgram).
     void handleAsyncUpdate() override;
+
+    // Latency reporting (see updateReportedLatency).
+    void parameterChanged (const juce::String& parameterID, float newValue) override;
+    void timerCallback() override { updateReportedLatency(); }
+    params::Mode getModeParameter() const;
+
     void applyProgram (int index);
     void pushParametersToDsp (bool forceBypass);
     void process (juce::AudioBuffer<float>& buffer, bool forceBypass);
@@ -110,6 +128,9 @@ private:
     std::atomic<float>* mixValue = nullptr;
     std::atomic<float>* outputValue = nullptr;
     std::atomic<float>* bypassValue = nullptr;
+    std::atomic<float>* modeValue = nullptr;
+    std::atomic<float>* formantValue = nullptr;
+    std::atomic<float>* tightValue = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LowChugProcessor)
 };

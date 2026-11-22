@@ -152,6 +152,10 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelpButton)
 };
 
+/** Where call-outs go: the main view (the editor's child, which the editor
+    scales as a whole), so they scale with the rest of the UI. */
+juce::Component* findOverlayParent (juce::Component&);
+
 /** Fills a card: the panel color with its border. */
 void drawCard (juce::Graphics&, juce::Rectangle<float>, juce::Colour fill);
 

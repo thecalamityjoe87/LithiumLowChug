@@ -19,13 +19,17 @@ inline PhaseVocoderEngine::Config live()
     return c;
 }
 
-/** Studio: longer windows for the cleanest low end, 2048 samples (42.7 ms) of latency. */
+/** Studio: longer windows for the cleanest low end. 2048 + 256 samples
+    (48.0 ms at 48 kHz) of latency: the extra hop (256) lets each 8192-point
+    frame's work be spread over the blocks that follow it, so no single
+    audio block has to pay for a whole frame. */
 inline PhaseVocoderEngine::Config studio()
 {
     PhaseVocoderEngine::Config c;
     c.fftSize = 8192;
     c.synthesisSize = 2048;
     c.overlap = 8;
+    c.splitComputation = true;
     return c;
 }
 
