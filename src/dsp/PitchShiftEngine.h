@@ -47,9 +47,22 @@ public:
     /** Delay in samples between input and output. Valid after prepare(). */
     virtual int getLatencySamples() const = 0;
 
+    /** How many past input samples the current output depends on. After the
+        channels have carried identical audio for this long, their outputs
+        are identical too, so a caller can process just one and copy it.
+        0 = unknown (callers then never take that shortcut). */
+    virtual int getMemorySamples() const { return 0; }
+
+    /** Makes channel `to` continue exactly as channel `from` would, e.g.
+        when two linked (identical) channels start to differ. Realtime-safe.
+        Returns false if the engine can't do this. */
+    virtual bool copyChannelState (int from, int to) { (void) from; (void) to; return false; }
+
     /** Processes numSamples (<= maxBlockSize) of each channel.
         input and output must NOT point at the same memory: engines read
-        input history while writing output. */
+        input history while writing output. numChannels may be lower than
+        the prepared count; the remaining channels are then left untouched
+        (see copyChannelState for resuming them). */
     virtual void process (const float* const* input, float* const* output,
                           int numChannels, int numSamples) = 0;
 

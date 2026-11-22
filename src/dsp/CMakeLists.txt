@@ -2,6 +2,7 @@
 # standard library and the (header-only, MIT) Signalsmith libraries.
 
 add_library(lowchug_dsp STATIC
+    Detuner.cpp
     engines/GranularEngine.cpp
     engines/PhaseVocoderEngine.cpp
     engines/SignalsmithEngine.cpp)

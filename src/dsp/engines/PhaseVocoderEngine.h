@@ -59,6 +59,8 @@ public:
     // A sample can only leave once every frame overlapping it has been
     // synthesised, i.e. one synthesis window after it arrived.
     int getLatencySamples() const override { return synthesisSize; }
+    int getMemorySamples() const override { return fftSize + synthesisSize; }
+    bool copyChannelState (int from, int to) override;
     void process (const float* const* input, float* const* output,
                   int numChannels, int numSamples) override;
     std::string_view getName() const override { return name; }
@@ -78,6 +80,7 @@ private:
     std::string name;
 
     int fftSize = 0, synthesisSize = 0, hop = 0, numBins = 0, numChannels = 0;
+    int activeChannels = 0;  // channels fed by the latest process() call
     int windowPeak = 0;      // analysis window maximum; FFT phases are relative to it
     float outputScale = 1.0f;
     int rover = 0;

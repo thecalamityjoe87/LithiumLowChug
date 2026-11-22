@@ -9,12 +9,12 @@ Formats: VST3, LV2 and Standalone on Linux/Windows/macOS, plus AU on macOS. Made
 | Milestone | State |
 |---|---|
 | 1. Skeleton and engine evaluation | done: see [docs/engine-evaluation.md](docs/engine-evaluation.md) |
-| 2. Core DSP | next |
-| 3. Quality features (modes, formants, transients, tight) | |
+| 2. Core DSP | done |
+| 3. Quality features (modes, formants, transients, tight) | next |
 | 4. UI and presets | |
 | 5. Hardening (pluginval, hosts, profiling) | |
 
-Right now the plugin is a clean passthrough with all its parameters in place. It uses JUCE's generic editor.
+The plugin shifts pitch with the Live engine (1024 samples, 21.3 ms of latency at 48 kHz). Working controls: Playing in, Hear, Shift, Fine, Mix, Output and Bypass. Mode, Formant and Tight exist as parameters but do nothing until milestone 3. The editor is JUCE's generic one until milestone 4.
 
 ## Building
 
@@ -45,7 +45,9 @@ cmake -S . -B build/eval -G Ninja -DLOWCHUG_BUILD_PLUGIN=OFF
 ```
 cmake/              PluginIdentity.cmake (names, codes, IDs), Dependencies.cmake
 src/dsp/            plugin-independent DSP (plain C++, no JUCE)
+  Detuner.h             the complete effect: engine, dry delay, glide, mix, gain, bypass
   PitchShiftEngine.h    the swappable engine interface
+  EngineConfigs.h       the Live and Studio engine settings
   engines/              PhaseVocoderEngine (chosen), SignalsmithEngine, GranularEngine (reference)
 src/plugin/         JUCE wrapper: processor, parameters, tuning model
 src/ui/             (milestone 4)

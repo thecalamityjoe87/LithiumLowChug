@@ -50,6 +50,7 @@ void PhaseVocoderEngine::prepare (double newSampleRate, int /*maxBlockSize*/, in
 {
     sampleRate = (float) newSampleRate;
     numChannels = newNumChannels;
+    activeChannels = numChannels;
 
     // The config is specified at 48 kHz. At 88.2/96 kHz and above, scale the
     // FFT by the nearest power of two so the window (and latency) stays about
@@ -173,6 +174,7 @@ void PhaseVocoderEngine::process (const float* const* input, float* const* outpu
 {
     const int writeStart = fftSize - hop;
     const int channelCount = std::min (numChannelsToProcess, numChannels);
+    activeChannels = channelCount;
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -191,13 +193,28 @@ void PhaseVocoderEngine::process (const float* const* input, float* const* outpu
     }
 }
 
+bool PhaseVocoderEngine::copyChannelState (int from, int to)
+{
+    if (from < 0 || to < 0 || from >= numChannels || to >= numChannels)
+        return false;
+
+    // Copying into buffers of the same size: no allocation.
+    auto& src = channels[(size_t) from];
+    auto& dst = channels[(size_t) to];
+    std::copy (src.inFifo.begin(), src.inFifo.end(), dst.inFifo.begin());
+    std::copy (src.outFifo.begin(), src.outFifo.end(), dst.outFifo.begin());
+    std::copy (src.outAccumulator.begin(), src.outAccumulator.end(), dst.outAccumulator.begin());
+    return true;
+}
+
 void PhaseVocoderEngine::processFrame()
 {
     ratio = pendingRatio;
 
     // Analysis: window, rotate to zero phase, FFT each channel.
-    for (auto& ch : channels)
+    for (int c = 0; c < activeChannels; ++c)
     {
+        auto& ch = channels[(size_t) c];
         // Rotating the frame so the window's peak lands at index 0 makes the
         // FFT phases "zero-phase" relative to that moment.
         for (int i = 0; i < fftSize; ++i)
@@ -228,20 +245,23 @@ void PhaseVocoderEngine::processFrame()
     findPeaksAndRegions();
     computeRegionShifts (resetNow);
 
-    for (int c = 0; c < numChannels; ++c)
+    for (int c = 0; c < activeChannels; ++c)
         synthesiseChannel (c);
 
     // Slide the input history along by one hop.
-    for (auto& ch : channels)
-        std::copy (ch.inFifo.begin() + hop, ch.inFifo.end(), ch.inFifo.begin());
+    for (int c = 0; c < activeChannels; ++c)
+    {
+        auto& fifo = channels[(size_t) c].inFifo;
+        std::copy (fifo.begin() + hop, fifo.end(), fifo.begin());
+    }
 }
 
 void PhaseVocoderEngine::analyseSharedSpectrum()
 {
     std::fill (sumSpectrum.begin(), sumSpectrum.end(), Complex {});
-    for (auto& ch : channels)
+    for (int c = 0; c < activeChannels; ++c)
         for (int k = 0; k < numBins; ++k)
-            sumSpectrum[(size_t) k] += ch.spectrum[(size_t) k];
+            sumSpectrum[(size_t) k] += channels[(size_t) c].spectrum[(size_t) k];
 
     // The phase advance between frames gives each bin's true frequency, far
     // more precisely than the bin spacing.

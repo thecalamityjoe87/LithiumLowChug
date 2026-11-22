@@ -77,6 +77,57 @@ public:
         param->setValueNotifyingHost (param->convertTo0to1 (plainValue));
     }
 
+    static juce::AudioBuffer<float> makeSignal (int channels, int samples)
+    {
+        juce::AudioBuffer<float> buffer (channels, samples);
+        juce::Random random (42);
+        for (int ch = 0; ch < channels; ++ch)
+            for (int i = 0; i < samples; ++i)
+                buffer.setSample (ch, i, (random.nextFloat() * 2.0f - 1.0f) * 0.5f
+                                             + 0.3f * std::sin ((float) i * 0.0108f * (float) (ch + 1)));
+        return buffer;
+    }
+
+    /** Feeds the buffer through in odd-sized blocks, like an unpredictable host. */
+    static void processInBlocks (LowChugProcessor& p, juce::AudioBuffer<float>& buffer, bool hostBypass)
+    {
+        juce::MidiBuffer midi;
+        const int sizes[] = { 1, 17, 128, 333, 512, 64, 700 }; // 700 > the prepared maximum
+        for (int pos = 0, k = 0; pos < buffer.getNumSamples(); ++k)
+        {
+            const int n = std::min (sizes[k % 7], buffer.getNumSamples() - pos);
+            juce::AudioBuffer<float> block (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), pos, n);
+            if (hostBypass)
+                p.processBlockBypassed (block, midi);
+            else
+                p.processBlock (block, midi);
+            pos += n;
+        }
+    }
+
+    /** Checks out[i] == in[i - latency] bit for bit. When the host bypasses
+        an active instance, the detuner first crossfades (20 ms) from the
+        shifted signal, so exactness is checked once that has finished: it
+        completes within the latency, while the dry output is still silence. */
+    void expectSampleExactDelay (LowChugProcessor& p, bool hostBypass)
+    {
+        p.prepareToPlay (48000.0, 512);
+        const auto input = makeSignal (2, 24000);
+        auto buffer = input;
+        processInBlocks (p, buffer, hostBypass);
+        const int latency = p.getLatencySamples();
+        const int checkFrom = hostBypass ? latency : 0;
+        int mismatches = 0;
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+            {
+                const float expected = i >= latency ? input.getSample (ch, i - latency) : 0.0f;
+                if (i >= checkFrom && ! juce::exactlyEqual (buffer.getSample (ch, i), expected))
+                    ++mismatches;
+            }
+        expectEquals (mismatches, 0);
+    }
+
     void runTest() override
     {
         beginTest ("Identity");
@@ -96,41 +147,75 @@ public:
                 expect (p.getState().getParameter (id) != nullptr, id);
         }
 
-        beginTest ("Stereo passthrough is bit-identical with odd block sizes");
+        beginTest ("Reports the engine latency");
         {
             LowChugProcessor p;
             p.prepareToPlay (48000.0, 512);
-            juce::Random random (42);
-            juce::MidiBuffer midi;
-            for (int blockSize : { 1, 17, 128, 333, 512 })
-            {
-                juce::AudioBuffer<float> buffer (2, blockSize);
-                for (int ch = 0; ch < 2; ++ch)
-                    for (int i = 0; i < blockSize; ++i)
-                        buffer.setSample (ch, i, random.nextFloat() * 2.0f - 1.0f);
-                juce::AudioBuffer<float> original (buffer);
-                p.processBlock (buffer, midi);
-                for (int ch = 0; ch < 2; ++ch)
-                    for (int i = 0; i < blockSize; ++i)
-                        expect (juce::exactlyEqual (buffer.getSample (ch, i), original.getSample (ch, i)));
-            }
-            expectEquals (p.getLatencySamples(), 0);
+            expectEquals (p.getLatencySamples(), 1024);
+            p.prepareToPlay (96000.0, 256); // hosts re-prepare on rate changes
+            expectEquals (p.getLatencySamples(), 2048);
         }
 
-        beginTest ("Mono in, stereo out copies the input to both sides");
+        beginTest ("Effective shift follows Playing in / Hear, or the shift knob when Custom");
+        {
+            LowChugProcessor p;
+            expectWithinAbsoluteError (p.getEffectiveShift(), -2.0f, 1.0e-4f); // default: Standard -> D Standard
+            setParam (p, params::sourceTuning, (float) tunings::Source::dropD);
+            setParam (p, params::targetTuning, (float) TuningsTests::indexOf ("Drop A"));
+            expectWithinAbsoluteError (p.getEffectiveShift(), -5.0f, 1.0e-4f);
+            setParam (p, params::fine, 25.0f);
+            expectWithinAbsoluteError (p.getEffectiveShift(), -4.75f, 1.0e-4f);
+            setParam (p, params::targetTuning, (float) tunings::customTargetIndex);
+            setParam (p, params::shift, -7.0f);
+            expectWithinAbsoluteError (p.getEffectiveShift(), -6.75f, 1.0e-4f);
+        }
+
+        beginTest ("No shift is bit-identical to the latency-delayed input (odd block sizes)");
+        {
+            LowChugProcessor p;
+            setParam (p, params::sourceTuning, (float) tunings::Source::custom);
+            setParam (p, params::shift, 0.0f);
+            expectSampleExactDelay (p, false);
+        }
+
+        beginTest ("Bypass parameter gives the latency-delayed input exactly");
+        {
+            LowChugProcessor p;
+            setParam (p, params::bypass, 1.0f);
+            expectSampleExactDelay (p, false);
+        }
+
+        beginTest ("Host bypass (processBlockBypassed) gives the latency-delayed input exactly");
+        {
+            LowChugProcessor p;
+            expectSampleExactDelay (p, true);
+        }
+
+        beginTest ("The default tuning actually shifts");
+        {
+            LowChugProcessor p;
+            p.prepareToPlay (48000.0, 512);
+            const auto input = makeSignal (2, 48000);
+            auto buffer = input;
+            processInBlocks (p, buffer, false);
+            const int latency = p.getLatencySamples();
+            double difference = 0.0;
+            for (int i = latency; i < buffer.getNumSamples(); ++i)
+                difference = std::max (difference, (double) std::abs (buffer.getSample (0, i) - input.getSample (0, i - latency)));
+            expect (difference > 0.01, "output should differ from the delayed input at -2 st");
+        }
+
+        beginTest ("Mono in, stereo out copies the shifted signal to both sides");
         {
             LowChugProcessor p;
             auto layout = p.getBusesLayout();
             layout.inputBuses.getReference (0) = juce::AudioChannelSet::mono();
             expect (p.setBusesLayout (layout));
             p.prepareToPlay (48000.0, 64);
-            juce::AudioBuffer<float> buffer (2, 64);
-            buffer.clear();
-            for (int i = 0; i < 64; ++i)
-                buffer.setSample (0, i, (float) i / 64.0f);
-            juce::MidiBuffer midi;
-            p.processBlock (buffer, midi);
-            for (int i = 0; i < 64; ++i)
+            auto buffer = makeSignal (2, 9600);
+            buffer.clear (1, 0, buffer.getNumSamples());
+            processInBlocks (p, buffer, false);
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
                 expect (juce::exactlyEqual (buffer.getSample (1, i), buffer.getSample (0, i)));
         }
 
