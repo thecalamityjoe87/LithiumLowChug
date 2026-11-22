@@ -39,6 +39,7 @@ public:
 
     // For tests.
     TuningController& getTuningController() noexcept { return controller; }
+    TuningPanel& getTuningPanel() noexcept { return tuning; }
     ReadoutPanel& getReadoutPanel() noexcept { return readout; }
     UserSlider& getShiftSlider() noexcept { return shiftKnob.getSlider(); }
 
@@ -66,6 +67,9 @@ private:
     juce::TextButton formantButton { "Formant" };
     juce::AudioProcessorValueTreeState::ButtonAttachment formantAttachment;
     LabeledKnob tightKnob;
+
+    // The "?" in the two lower cards (the upper cards have their own).
+    HelpButton controlsHelp, qualityHelp;
 
     AboutPanel about; // last, so it sits on top of everything
 

@@ -485,6 +485,40 @@ public:
             expectEquals (p.getShiftSemitones(), -2);
         }
 
+        beginTest ("The dial offers only reachable tunings, steps lower, and snaps out of Custom");
+        {
+            LowChugProcessor p;
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& view = editor->getMainView();
+            auto& dial = view.getTuningPanel().getDial();
+
+            // From Standard: E Standard ... A Standard, then Octave Down.
+            expectEquals ((int) dial.getDetents().size(), 9);
+            expectEquals (dial.getDetents().front(), TuningsTests::indexOf ("E Standard"));
+            expectEquals (dial.getDetents().back(), tunings::octaveDownIndex);
+
+            dial.step (1); // D Standard -> C# Standard
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), TuningsTests::indexOf ("C# Standard"));
+            expectEquals (p.getShiftSemitones(), -3);
+
+            // From Drop D the dial's notches are the drop tunings.
+            view.getTuningController().pickSource (tunings::Source::dropD);
+            expectEquals (dial.getDetents().front(), TuningsTests::indexOf ("Drop D"));
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), TuningsTests::indexOf ("Drop B")); // still -3
+
+            // Shift by hand to -6 (Custom); the next step lands on the nearest tuning, Drop Ab.
+            static_cast<juce::Component&> (view.getShiftSlider()).keyPressed (juce::KeyPress (juce::KeyPress::downKey));
+            static_cast<juce::Component&> (view.getShiftSlider()).keyPressed (juce::KeyPress (juce::KeyPress::downKey));
+            static_cast<juce::Component&> (view.getShiftSlider()).keyPressed (juce::KeyPress (juce::KeyPress::downKey));
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), tunings::customTargetIndex);
+            dial.step (1);
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), TuningsTests::indexOf ("Drop Ab"));
+
+            // Playing in Custom: no notches at all.
+            view.getTuningController().pickSource (tunings::Source::custom);
+            expect (dial.getDetents().empty());
+        }
+
         beginTest ("The visualizer measures the real shift (Drop D -> Drop C)");
         {
             LowChugProcessor p;

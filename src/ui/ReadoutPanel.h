@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Controls.h"
 #include "ShiftAnalyzer.h"
 #include "TuningController.h"
 
@@ -29,6 +30,7 @@ public:
     ~ReadoutPanel() override;
 
     void paint (juce::Graphics&) override;
+    void resized() override;
 
     /** The most recent measurement (for tests). */
     const ShiftAnalyzer::Result& getLastResult() const noexcept { return result; }
@@ -49,6 +51,7 @@ private:
     ShiftAnalyzer::Result result;
     std::vector<float> scratchIn, scratchOut;
     std::atomic<float>* bypassValue = nullptr;
+    HelpButton help;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReadoutPanel)
 };

@@ -16,7 +16,7 @@ Formats: VST3, LV2 and Standalone on Linux/Windows/macOS, plus AU on macOS. Made
 
 The plugin shifts pitch with the Live engine (1024 samples, 21.3 ms of latency at 48 kHz). Working controls: Playing in, Hear, Shift, Fine, Mix, Output and Bypass. Mode, Formant and Tight exist as parameters but do nothing until milestone 3; the editor shows them as "coming soon".
 
-The editor (src/ui) has the Lithium family look (Lithium Drums' colors, fonts and knob). Its "You hear" card includes a visualizer: input and output spectra with the open strings of the tuning you hear marked, and the shift actually measured between input and output (it compares the two spectra on a log-frequency axis, so it works on chords), with how many cents it is from what the controls ask for.
+The editor (src/ui) has the Lithium family look (Lithium Drums' colors, fonts and knob). You pick how your guitar is tuned with the Playing in buttons and the tuning you want with the "Tune down to" dial, whose notches are the tunings reachable from yours; each card has a "?" that explains it. Its "You hear" card includes a visualizer: input and output spectra with the open strings of the tuning you hear marked, and the shift actually measured between input and output (it compares the two spectra on a log-frequency axis, so it works on chords), with how many cents it is from what the controls ask for.
 
 ## Building
 

@@ -76,48 +76,6 @@ void LabeledKnob::resized()
 }
 
 //==============================================================================
-TuningChip::TuningChip (const juce::String& name, const juce::String& bigText, const juce::String& smallText)
-    : Button (name), big (bigText), small (smallText)
-{
-    setTitle (name); // what screen readers announce
-    setClickingTogglesState (false); // the parameter decides which chip is lit
-}
-
-void TuningChip::paintButton (juce::Graphics& g, bool isMouseOver, bool isButtonDown)
-{
-    using namespace theme::colors;
-
-    const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
-    const auto on = getToggleState();
-
-    auto fill = on ? accent : raised;
-    if (isButtonDown)
-        fill = fill.brighter (0.12f);
-    else if (isMouseOver)
-        fill = on ? accent.brighter (0.08f) : raisedHigh;
-
-    g.setColour (fill);
-    g.fillRoundedRectangle (bounds, theme::cornerRadius);
-    g.setColour (on ? fill : (isMouseOver ? borderStrong : border));
-    g.drawRoundedRectangle (bounds, theme::cornerRadius, 1.0f);
-
-    auto textArea = bounds.reduced (2.0f, 6.0f);
-    g.setColour (on ? background : theme::colors::text); // plain "text" would be Button::text
-    g.setFont (theme::label (big.length() > 3 ? 15.0f : 19.0f, theme::Weight::semibold));
-    g.drawText (big, textArea.removeFromTop (textArea.getHeight() * 0.58f), juce::Justification::centredBottom, false);
-
-    g.setColour (on ? background.withAlpha (0.8f) : textMuted);
-    g.setFont (theme::mono (10.5f));
-    g.drawText (small, textArea, juce::Justification::centredTop, false);
-
-    if (hasKeyboardFocus (false))
-    {
-        g.setColour (focus);
-        g.drawRoundedRectangle (bounds.reduced (1.0f), theme::cornerRadius, (float) theme::size::focusRing);
-    }
-}
-
-//==============================================================================
 InfoButton::InfoButton() : Button ("About")
 {
     setTooltip ("About Lithium LowChug");
@@ -144,6 +102,83 @@ void InfoButton::paintButton (juce::Graphics& g, bool isMouseOver, bool isDown)
         g.setColour (focus);
         g.drawEllipse (bounds, (float) theme::size::focusRing);
     }
+}
+
+//==============================================================================
+namespace
+{
+/** Where call-outs go: the main view (the editor's child, which the editor
+    scales as a whole), so they scale with the rest of the UI. */
+juce::Component* findOverlayParent (juce::Component& c)
+{
+    for (auto* p = &c; p != nullptr; p = p->getParentComponent())
+        if (dynamic_cast<juce::AudioProcessorEditor*> (p->getParentComponent()) != nullptr)
+            return p;
+    return c.getTopLevelComponent();
+}
+
+/** A "?" in a ring, centered by its ink: a font's text box has room for
+    ascenders and descenders, which would leave the mark sitting high. */
+void drawHelpMark (juce::Graphics& g, juce::Rectangle<float> ring, bool highlighted)
+{
+    g.setColour (highlighted ? theme::colors::accent : theme::colors::textMuted);
+    g.drawEllipse (ring.reduced (0.75f), 1.3f);
+
+    juce::GlyphArrangement mark;
+    mark.addLineOfText (theme::body (10.5f, theme::Weight::bold), "?", 0.0f, 0.0f);
+    const auto ink = mark.getBoundingBox (0, -1, true);
+    mark.moveRangeOfGlyphs (0, -1, ring.getCentreX() - ink.getCentreX(), ring.getCentreY() - ink.getCentreY());
+    mark.draw (g);
+}
+} // namespace
+
+HelpPopover::HelpPopover (const juce::String& heading, const juce::StringArray& paragraphs)
+{
+    using namespace theme;
+    constexpr int width = 340;
+
+    // One block of styled text: the heading, then each paragraph after a
+    // short gap. TextLayout wraps it to the width and tells us its height.
+    juce::AttributedString text;
+    text.append (heading, body (14.5f, Weight::semibold), colors::text);
+
+    for (const auto& p : paragraphs)
+    {
+        text.append ("\n", body (14.5f), colors::text);
+        text.append ("\n", body (6.0f), colors::text); // the gap between paragraphs
+        text.append (p, body (type::small), colors::text.withAlpha (0.88f));
+    }
+
+    text.setWordWrap (juce::AttributedString::byWord);
+    layout.createLayout (text, (float) (width - 2 * padding));
+    setSize (width, juce::roundToInt (layout.getHeight()) + 2 * padding);
+}
+
+void HelpPopover::paint (juce::Graphics& g)
+{
+    layout.draw (g, getLocalBounds().reduced (padding).toFloat());
+}
+
+void HelpPopover::show (juce::Component& from, juce::Rectangle<int> target, const juce::String& heading,
+                        const juce::StringArray& paragraphs)
+{
+    if (auto* parent = findOverlayParent (from))
+        juce::CallOutBox::launchAsynchronously (std::make_unique<HelpPopover> (heading, paragraphs),
+                                                parent->getLocalArea (&from, target), parent);
+}
+
+HelpButton::HelpButton (juce::String h, juce::StringArray p)
+    : juce::Button ("Help: " + h), heading (std::move (h)), paragraphs (std::move (p))
+{
+    setTooltip ("What " + heading + " does");
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setWantsKeyboardFocus (false);
+    onClick = [this] { HelpPopover::show (*this, getLocalBounds(), heading, paragraphs); };
+}
+
+void HelpButton::paintButton (juce::Graphics& g, bool highlighted, bool down)
+{
+    drawHelpMark (g, getLocalBounds().toFloat().withSizeKeepingCentre (14.0f, 14.0f), highlighted || down);
 }
 
 //==============================================================================

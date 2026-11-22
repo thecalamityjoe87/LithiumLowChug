@@ -41,7 +41,18 @@ MainView::MainView (LowChugProcessor& p)
               modeButtons[(size_t) i].setToggleState (juce::roundToInt (value) == i, juce::dontSendNotification);
       }),
       formantAttachment (p.getState(), params::formant, formantButton),
-      tightKnob (p.getState(), params::tight, "Tight", std::nullopt, size::knobSmall)
+      tightKnob (p.getState(), params::tight, "Tight", std::nullopt, size::knobSmall),
+      controlsHelp ("Controls", {
+          "Shift: the shift in semitones. It follows the dial; turning it by hand sets your own shift (Custom).",
+          "Fine: nudges the pitch up or down by up to 50 cents, to match a band tuned slightly off.",
+          "Mix: how much of the shifted guitar you hear. 100 % is shifted only; lower blends in your guitar as played.",
+          "Output: the output level. Double-click any knob to reset it." }),
+      qualityHelp ("Quality (coming soon)", {
+          "These arrive in the next update.",
+          "Live / Studio: Live has the lowest latency (21 ms), for playing. Studio sounds cleaner in the lows with "
+          "43 ms of latency, for recording and mixing.",
+          "Formant: keeps your guitar sounding like itself as you tune down, rather than darker and boomier.",
+          "Tight: tightens the low end on big drops." })
 {
     addAndMakeVisible (header);
     addAndMakeVisible (tuning);
@@ -90,6 +101,9 @@ MainView::MainView (LowChugProcessor& p)
     tightKnob.getSlider().setTooltip (comingSoonTip);
     addAndMakeVisible (tightKnob);
 
+    addAndMakeVisible (controlsHelp);
+    addAndMakeVisible (qualityHelp);
+
     header.onShowAbout = [this] { showAbout (true); };
     about.onClose = [this] { showAbout (false); };
     addChildComponent (about);
@@ -118,6 +132,14 @@ void MainView::resized()
     tuning.setBounds (tuningCard);
     readout.setBounds (readoutCard);
     about.setBounds (getLocalBounds());
+
+    // Each card's "?" sits 10 px in from its top-right corner.
+    const auto helpAt = [] (juce::Rectangle<int> card)
+    {
+        return juce::Rectangle<int> (card.getRight() - 10 - HelpButton::size, card.getY() + 10, HelpButton::size, HelpButton::size);
+    };
+    controlsHelp.setBounds (helpAt (getKnobsCard()));
+    qualityHelp.setBounds (helpAt (getComingSoonCard()));
 
     // The four knobs, spread evenly across their card.
     const auto knobs = getKnobsCard();
@@ -165,7 +187,7 @@ void MainView::paint (juce::Graphics& g)
 
     const auto pillFont = label (10.5f, Weight::bold);
     const auto pillWidth = getTrackedTextWidth ("COMING SOON", pillFont, 0.12f) + 18.0f;
-    const auto pill = top.removeFromRight (pillWidth);
+    const auto pill = top.withRight ((float) qualityHelp.getX() - 6.0f).removeFromRight (pillWidth);
     g.setColour (colors::borderStrong);
     g.drawRoundedRectangle (pill.reduced (0.5f), pill.getHeight() * 0.5f, 1.0f);
     g.setColour (colors::textMuted);

@@ -61,6 +61,15 @@ public:
     void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height, float sliderPosProportional,
                            float rotaryStartAngle, float rotaryEndAngle, juce::Slider&) override;
 
+    /** The machined knob's skirt, cap and pointer (no scale or arc), centered
+        on `center`. Shared by the knobs and the tuning dial. `angle` is in
+        radians, clockwise from 12 o'clock. */
+    static void drawMachinedCap (juce::Graphics&, juce::Point<float> center, float skirtRadius, float angle,
+                                 bool enabled, bool highlighted);
+
+    void drawCallOutBoxBackground (juce::CallOutBox&, juce::Graphics&, const juce::Path&, juce::Image&) override;
+    float getCallOutBoxCornerSize (const juce::CallOutBox&) override { return theme::cornerRadius + 2.0f; }
+
     juce::Font getPopupMenuFont() override;
     void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
 

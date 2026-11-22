@@ -83,20 +83,6 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LabeledKnob)
 };
 
-/** One "Hear" button: a big note name over a small shift ("Eb" / "-1 st"). */
-class TuningChip final : public juce::Button
-{
-public:
-    TuningChip (const juce::String& name, const juce::String& big, const juce::String& small);
-
-    void paintButton (juce::Graphics&, bool isMouseOver, bool isButtonDown) override;
-
-private:
-    juce::String big, small;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TuningChip)
-};
-
 /** The small round "i" button in the header that opens About, drawn the
     same as Lithium Drums' (a round outline that lights on hover). */
 class InfoButton final : public juce::Button
@@ -107,6 +93,47 @@ public:
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (InfoButton)
+};
+
+/** What a help mark opens: a heading and a few short paragraphs, in a
+    call-out pointing at the mark. (As in Lithium Drums.) */
+class HelpPopover final : public juce::Component
+{
+public:
+    HelpPopover (const juce::String& heading, const juce::StringArray& paragraphs);
+
+    void paint (juce::Graphics&) override;
+
+    /** Opens one in a call-out pointing at `target` (in `from`'s coordinates).
+        The call-out owns the popover and deletes it when it closes (a click
+        elsewhere, or Escape). */
+    static void show (juce::Component& from, juce::Rectangle<int> target, const juce::String& heading,
+                      const juce::StringArray& paragraphs);
+
+private:
+    static constexpr int padding = 16;
+    juce::TextLayout layout;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelpPopover)
+};
+
+/** The "?" in a card's top-right corner that explains the card, for new
+    users. Clicking it opens a HelpPopover. Drawn as in Lithium Drums: a "?"
+    in a 14 px ring, gray, cyan on hover. */
+class HelpButton final : public juce::Button
+{
+public:
+    HelpButton (juce::String heading, juce::StringArray paragraphs);
+
+    void paintButton (juce::Graphics&, bool highlighted, bool down) override;
+
+    static constexpr int size = 20; // the button; the ring in it is 14 px
+
+private:
+    juce::String heading;
+    juce::StringArray paragraphs;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HelpButton)
 };
 
 /** Fills a card: the panel color with its border. */

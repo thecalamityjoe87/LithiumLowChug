@@ -237,10 +237,6 @@ void LithiumLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int 
     if (const auto origin = slider.getProperties()["origin"]; ! origin.isVoid())
         fromAngle = startAngle + (float) slider.valueToProportionOfLength ((double) origin) * (endAngle - startAngle);
 
-    auto circle = [&] (float radius, float dy = 0.0f)
-    {
-        return juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c.translated (0.0f, dy));
-    };
     auto arc = [&] (float radius, float a0, float a1)
     {
         juce::Path p;
@@ -283,6 +279,30 @@ void LithiumLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int 
         g.strokePath (value, roundStroke (arcWidth));
     }
 
+    // The skirt, cap and pointer.
+    const auto skirt = juce::Rectangle<float> (64.0f * u, 64.0f * u).withCentre (c);
+    drawMachinedCap (g, c, 32.0f * u, angle, enabled, slider.isMouseOverOrDragging());
+
+    if (slider.hasKeyboardFocus (false))
+    {
+        g.setColour (focus);
+        g.drawEllipse (skirt.expanded (1.5f), (float) theme::size::focusRing);
+    }
+}
+
+//==============================================================================
+void LithiumLookAndFeel::drawMachinedCap (juce::Graphics& g, juce::Point<float> c, float skirtRadius, float angle,
+                                          bool enabled, bool highlighted)
+{
+    using namespace theme::colors;
+
+    // Sizes in hundredths of the full knob (whose skirt is 32 of them).
+    const auto u = skirtRadius / 32.0f;
+    auto circle = [&] (float radius, float dy = 0.0f)
+    {
+        return juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c.translated (0.0f, dy));
+    };
+
     // The skirt, on its shadow.
     const auto skirt = circle (32.0f * u);
     g.setColour (knobShadow);
@@ -308,7 +328,7 @@ void LithiumLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int 
     g.setGradientFill (sheenFill);
     g.fillEllipse (cap);
 
-    if (slider.isMouseOverOrDragging() && enabled)
+    if (highlighted && enabled)
     {
         g.setColour (juce::Colours::white.withAlpha (0.06f));
         g.fillEllipse (cap);
@@ -329,18 +349,23 @@ void LithiumLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int 
         p.startNewSubPath (c.x + dx, c.y - r0);
         p.lineTo (c.x + dx, c.y - r1);
         g.setColour (color);
-        g.strokePath (p, roundStroke (lineWidth), turn);
+        g.strokePath (p, juce::PathStrokeType (lineWidth, juce::PathStrokeType::curved, juce::PathStrokeType::rounded), turn);
     };
 
     line (30.5f * u, 24.0f * u, std::max (1.5f, 3.2f * u), enabled ? text : textMuted);
     line (22.0f * u, 10.0f * u, std::max (1.2f, 2.6f * u), knobGroove);
     line (21.5f * u, 10.5f * u, std::max (0.6f, 0.8f * u), knobGrooveHighlight, 1.2f * u);
+}
 
-    if (slider.hasKeyboardFocus (false))
-    {
-        g.setColour (focus);
-        g.drawEllipse (skirt.expanded (1.5f), (float) theme::size::focusRing);
-    }
+//==============================================================================
+void LithiumLookAndFeel::drawCallOutBoxBackground (juce::CallOutBox&, juce::Graphics& g, const juce::Path& path, juce::Image&)
+{
+    // A soft shadow, then the panel with its border, as in Lithium Drums.
+    juce::DropShadow (juce::Colours::black.withAlpha (0.45f), 14, { 0, 3 }).drawForPath (g, path);
+    g.setColour (theme::colors::panel);
+    g.fillPath (path);
+    g.setColour (theme::colors::borderStrong);
+    g.strokePath (path, juce::PathStrokeType (1.0f));
 }
 
 //==============================================================================

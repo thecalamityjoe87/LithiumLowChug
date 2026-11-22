@@ -25,8 +25,17 @@ juce::String formatShift (int semitones, float fineCents)
 } // namespace
 
 ReadoutPanel::ReadoutPanel (LowChugProcessor& p, TuningController& c)
-    : processor (p), controller (c)
+    : processor (p), controller (c),
+      help ("You hear", {
+          "The tuning you are hearing, and the shift in semitones (st).",
+          "The graph: your guitar in gray and what comes out in cyan, from low notes on the left to high on the right. "
+          "The dashed lines mark the open strings of the tuning you hear; play your open strings and the cyan peaks "
+          "should sit on them.",
+          "The line below: the shift LowChug actually measures, and how far it is from what you asked for, in cents "
+          "(hundredths of a semitone). Within 5 cents is On target." })
 {
+    addAndMakeVisible (help);
+
     bypassValue = p.getState().getRawParameterValue (params::bypass);
     scratchIn.resize (4096);
     scratchOut.resize (4096);
@@ -67,6 +76,12 @@ void ReadoutPanel::analyzeNow()
     repaint();
 }
 
+void ReadoutPanel::resized()
+{
+    // The "?" in the top-right corner, level with the caption.
+    help.setBounds (getWidth() - 10 - HelpButton::size, 11, HelpButton::size, HelpButton::size);
+}
+
 void ReadoutPanel::paint (juce::Graphics& g)
 {
     using namespace theme;
@@ -80,7 +95,8 @@ void ReadoutPanel::paint (juce::Graphics& g)
     if (isBypassed())
     {
         g.setColour (colors::warning);
-        drawTrackedText (g, "BYPASSED", label (type::caption, Weight::bold), 0.12f, captionRow, juce::Justification::centredRight);
+        drawTrackedText (g, "BYPASSED", label (type::caption, Weight::bold), 0.12f,
+                         captionRow.withRight ((float) help.getX() - 4.0f), juce::Justification::centredRight);
     }
     area.removeFromTop (4.0f);
 
