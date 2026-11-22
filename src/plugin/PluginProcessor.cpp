@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 
 #include "Parameters.h"
+#include "Presets.h"
 #include "StandaloneAudio.h"
 #include "Tunings.h"
 #include "ui/PluginEditor.h"
@@ -31,7 +32,8 @@ juce::AudioProcessor::BusesProperties LowChugProcessor::makeBuses()
 LowChugProcessor::LowChugProcessor()
     : AudioProcessor (makeBuses()),
       // "PARAMETERS" is the root tag of the saved state. nullptr = no undo manager.
-      state (*this, nullptr, "PARAMETERS", params::createLayout())
+      state (*this, nullptr, "PARAMETERS", params::createLayout()),
+      currentProgram (presets::defaultPreset) // the parameter defaults are D Standard, Live
 {
     shiftValue = state.getRawParameterValue (params::shift);
     fineValue = state.getRawParameterValue (params::fine);
@@ -159,6 +161,54 @@ juce::AudioProcessorParameter* LowChugProcessor::getBypassParameter() const
     return state.getParameter (params::bypass);
 }
 
+int LowChugProcessor::getNumPrograms()
+{
+    return presets::numPresets;
+}
+
+const juce::String LowChugProcessor::getProgramName (int index)
+{
+    return presets::getName (index);
+}
+
+void LowChugProcessor::setCurrentProgram (int index)
+{
+    if (index < 0 || index >= presets::numPresets)
+        return;
+
+    // Loading a preset writes nine parameters and the saved state, which
+    // belongs on the message thread. Most hosts call this from there, but
+    // not all of them (a host may switch programs from its audio or a
+    // worker thread). So: apply now if we are on the message thread,
+    // otherwise remember it and let AsyncUpdater call handleAsyncUpdate()
+    // on the message thread shortly. triggerAsyncUpdate() is safe to call
+    // from any thread.
+    currentProgram = index;
+
+    if (juce::MessageManager::existsAndIsCurrentThread())
+    {
+        applyProgram (index);
+    }
+    else
+    {
+        pendingProgram = index;
+        triggerAsyncUpdate();
+    }
+}
+
+void LowChugProcessor::handleAsyncUpdate()
+{
+    if (const auto index = pendingProgram.exchange (-1); index >= 0)
+        applyProgram (index);
+}
+
+void LowChugProcessor::applyProgram (int index)
+{
+    presets::apply (state, index);
+    // Saved with the session, so the preset box shows it again on reload.
+    state.state.setProperty ("program", index, nullptr);
+}
+
 juce::AudioProcessorEditor* LowChugProcessor::createEditor()
 {
     // Called by the host on the message thread whenever it opens our window.
@@ -180,7 +230,13 @@ void LowChugProcessor::setStateInformation (const void* data, int sizeInBytes)
     // Only accept our own state (a host may hand us anything).
     if (const auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (state.state.getType()))
+        {
             state.replaceState (juce::ValueTree::fromXml (*xml));
+
+            // Which preset was loaded (older sessions don't say: keep the default).
+            const int program = state.state.getProperty ("program", presets::defaultPreset);
+            currentProgram = juce::jlimit (0, presets::numPresets - 1, program);
+        }
 }
 
 } // namespace lowchug

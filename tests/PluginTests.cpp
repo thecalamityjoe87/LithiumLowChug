@@ -5,6 +5,7 @@
 
 #include "plugin/Parameters.h"
 #include "plugin/PluginProcessor.h"
+#include "plugin/Presets.h"
 #include "plugin/Tunings.h"
 #include "ui/LithiumLookAndFeel.h"
 #include "ui/PluginEditor.h"
@@ -12,6 +13,8 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
+
+#include <thread>
 
 namespace lowchug
 {
@@ -282,6 +285,59 @@ public:
             expectWithinAbsoluteError (plain (params::mix), 40.0f, 1.0e-3f);
         }
 
+        beginTest ("Factory presets: 18 programs, Live then Studio, each setting its tuning");
+        {
+            LowChugProcessor p;
+            expectEquals (p.getNumPrograms(), 18);
+            expectEquals (p.getProgramName (0), juce::String ("Eb Standard (Live)"));
+            expectEquals (p.getProgramName (9), juce::String ("Eb Standard (Studio)"));
+            expectEquals (p.getProgramName (17), juce::String ("Octave Down (Studio)"));
+            expectEquals (p.getCurrentProgram(), presets::defaultPreset);
+            expect (presets::matches (p.getState(), presets::defaultPreset), "a fresh instance is D Standard (Live)");
+
+            auto plain = [&p] (const char* id) {
+                auto* param = p.getState().getParameter (id);
+                return param->convertFrom0to1 (param->getValue());
+            };
+
+            setParam (p, params::mix, 40.0f);
+            setParam (p, params::fine, 12.0f);
+            p.setCurrentProgram (5 + 9); // Drop C (Studio)
+            expectEquals (p.getCurrentProgram(), 14);
+            expectWithinAbsoluteError (plain (params::sourceTuning), (float) tunings::Source::dropD, 1.0e-4f);
+            expectWithinAbsoluteError (plain (params::targetTuning), (float) TuningsTests::indexOf ("Drop C"), 1.0e-4f);
+            expectWithinAbsoluteError (plain (params::shift), -2.0f, 1.0e-4f);
+            expectWithinAbsoluteError (plain (params::mode), 1.0f, 1.0e-4f);
+            expectWithinAbsoluteError (plain (params::mix), 100.0f, 1.0e-3f); // presets reset the sound controls
+            expectWithinAbsoluteError (plain (params::fine), 0.0f, 1.0e-3f);
+            expect (presets::matches (p.getState(), 14));
+
+            setParam (p, params::fine, 5.0f);
+            expect (! presets::matches (p.getState(), 14), "changing a setting marks the preset edited");
+
+            // Saved with the session.
+            juce::MemoryBlock saved;
+            p.getStateInformation (saved);
+            LowChugProcessor q;
+            q.setStateInformation (saved.getData(), (int) saved.getSize());
+            expectEquals (q.getCurrentProgram(), 14);
+        }
+
+        beginTest ("A host switching programs from another thread is applied on the message thread");
+        {
+            LowChugProcessor p;
+            std::thread host ([&p] { p.setCurrentProgram (7); }); // Drop A (Live)
+            host.join();
+            expectEquals (p.getCurrentProgram(), 7);
+            // Run the message loop until a "stop" posted now: messages are
+            // handled in order, so the AsyncUpdater's (posted by the host
+            // thread above) is handled first.
+            juce::MessageManager::callAsync ([] { juce::MessageManager::getInstance()->stopDispatchLoop(); });
+            juce::MessageManager::getInstance()->runDispatchLoop();
+            auto* target = p.getState().getParameter (params::targetTuning);
+            expectEquals (juce::roundToInt (target->convertFrom0to1 (target->getValue())), TuningsTests::indexOf ("Drop A"));
+        }
+
         beginTest ("Garbage state is ignored");
         {
             LowChugProcessor p;
@@ -517,6 +573,57 @@ public:
             // Playing in Custom: no notches at all.
             view.getTuningController().pickSource (tunings::Source::custom);
             expect (dial.getDetents().empty());
+        }
+
+        beginTest ("The preset box steps through presets and marks edits");
+        {
+            LowChugProcessor p;
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& bar = editor->getMainView().getHeader().getPresetBar();
+            expectEquals (bar.getShownName(), juce::String ("D Standard"));
+            bar.step (1);
+            expectEquals (p.getCurrentProgram(), presets::defaultPreset + 1);
+            expectEquals (bar.getShownName(), juce::String ("C# Standard"));
+            bar.step (-3); // wraps around to the last preset
+            expectEquals (p.getCurrentProgram(), 17);
+            editor->getMainView().getTuningPanel().getDial().step (-1);
+            bar.refresh();
+            expect (bar.getShownName().endsWith ("*"), "an edited preset is marked");
+        }
+
+        beginTest ("The tuner reads the string being played (before the shift)");
+        {
+            LowChugProcessor p;
+            prepare (p);
+            auto editor = std::make_unique<LowChugEditor> (p);
+            auto& readout = editor->getMainView().getReadoutPanel();
+            readout.showTuner (true);
+
+            // An A string (110 Hz), 6 cents sharp, while LowChug shifts down 2.
+            const double hz = 110.0 * std::pow (2.0, 6.0 / 1200.0);
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer midi;
+            for (int pos = 0; pos < 48000; pos += 512)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const double t = (pos + i) / 48000.0;
+                    float v = 0.0f;
+                    for (int h = 1; h <= 6; ++h)
+                        v += (float) (0.2 / h * std::sin (juce::MathConstants<double>::twoPi * hz * h * t + h));
+                    block.setSample (0, i, v);
+                }
+                block.clear (1, 0, 512);
+                p.processBlock (block, midi);
+                if (pos % 1536 == 0)
+                    readout.analyzeNow();
+            }
+
+            const auto note = readout.getTuner().getShownNote();
+            logMessage ("    tuner shows MIDI " + juce::String (note, 3) + " (A2 is 45, +6 ct = 45.06)");
+            expectWithinAbsoluteError (note, 45.06f, 0.02f); // within 2 cents
+
+            saveSnapshot (*editor, "lowchug-tuner-2x", 2.0f);
         }
 
         beginTest ("The visualizer measures the real shift (Drop D -> Drop C)");

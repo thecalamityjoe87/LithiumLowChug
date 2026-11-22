@@ -26,15 +26,24 @@ juce::String formatShift (int semitones, float fineCents)
 
 ReadoutPanel::ReadoutPanel (LowChugProcessor& p, TuningController& c)
     : processor (p), controller (c),
-      help ("You hear", {
+      tuner (c),
+      help ("You hear and Tuner", {
           "The tuning you are hearing, and the shift in semitones (st).",
           "The graph: your guitar in gray and what comes out in cyan, from low notes on the left to high on the right. "
           "The dashed lines mark the open strings of the tuning you hear; play your open strings and the cyan peaks "
           "should sit on them.",
           "The line below: the shift LowChug actually measures, and how far it is from what you asked for, in cents "
-          "(hundredths of a semitone). Within 5 cents is On target." })
+          "(hundredths of a semitone). Within 5 cents is On target.",
+          "Tuner: tunes your guitar itself (before the shift) to the tuning you play in. Play one string at a time; "
+          "the strings of your tuning are shown along the bottom." })
 {
+    hearTab.onClick = [this] { showTuner (false); };
+    tunerTab.onClick = [this] { showTuner (true); };
+    addAndMakeVisible (hearTab);
+    addAndMakeVisible (tunerTab);
+    addChildComponent (tuner);
     addAndMakeVisible (help);
+    showTuner (false);
 
     bypassValue = p.getState().getRawParameterValue (params::bypass);
     scratchIn.resize (4096);
@@ -66,20 +75,48 @@ void ReadoutPanel::analyzeNow()
     if (rate <= 0.0)
         return;
     if (! juce::exactlyEqual (rate, analyzer.getSampleRate()))
+    {
         analyzer.prepare (rate);
+        tuner.prepare (rate);
+    }
 
+    // Both views are fed all the time (cheap: a copy), so switching tabs
+    // shows a reading at once; only the visible one is analyzed.
     auto& tap = processor.getAnalysisTap();
     for (int n; (n = tap.read (scratchIn.data(), scratchOut.data(), (int) scratchIn.size())) > 0;)
+    {
         analyzer.push (scratchIn.data(), scratchOut.data(), n);
+        tuner.push (scratchIn.data(), n); // the input: the guitar as played
+    }
+
+    if (showingTuner)
+    {
+        tuner.update();
+        return;
+    }
 
     result = analyzer.update (processor.getLatencySamples(), processor.getEffectiveShift());
     repaint();
 }
 
+void ReadoutPanel::showTuner (bool show)
+{
+    showingTuner = show;
+    hearTab.setToggleState (! show, juce::dontSendNotification);
+    tunerTab.setToggleState (show, juce::dontSendNotification);
+    tuner.setVisible (show);
+    repaint();
+}
+
 void ReadoutPanel::resized()
 {
-    // The "?" in the top-right corner, level with the caption.
+    // The tabs where the caption was, the "?" in the top-right corner.
+    hearTab.setBounds (padding, 11, hearTab.getIdealWidth(), 20);
+    tunerTab.setBounds (hearTab.getRight() + theme::space::lg, 11, tunerTab.getIdealWidth(), 20);
     help.setBounds (getWidth() - 10 - HelpButton::size, 11, HelpButton::size, HelpButton::size);
+
+    // The tuner fills the card under the tabs.
+    tuner.setBounds (getLocalBounds().reduced (padding, 14).withTrimmedTop (26));
 }
 
 void ReadoutPanel::paint (juce::Graphics& g)
@@ -89,9 +126,8 @@ void ReadoutPanel::paint (juce::Graphics& g)
     drawCard (g, getLocalBounds().toFloat(), colors::readoutBox);
     auto area = getLocalBounds().toFloat().reduced ((float) padding, 14.0f);
 
-    // Caption row.
+    // The tab row (the tabs are child components; BYPASSED sits at its right).
     auto captionRow = area.removeFromTop (14.0f);
-    drawCaption (g, "YOU HEAR", captionRow);
     if (isBypassed())
     {
         g.setColour (colors::warning);
@@ -99,6 +135,9 @@ void ReadoutPanel::paint (juce::Graphics& g)
                          captionRow.withRight ((float) help.getX() - 4.0f), juce::Justification::centredRight);
     }
     area.removeFromTop (4.0f);
+
+    if (showingTuner) // the TunerView child draws the rest
+        return;
 
     // "Drop C"                         [-2 st]
     auto nameRow = area.removeFromTop (40.0f);

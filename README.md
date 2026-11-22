@@ -11,12 +11,12 @@ Formats: VST3, LV2 and Standalone on Linux/Windows/macOS, plus AU on macOS. Made
 | 1. Skeleton and engine evaluation | done: see [docs/engine-evaluation.md](docs/engine-evaluation.md) |
 | 2. Core DSP | done |
 | 3. Quality features (modes, formants, transients, tight) | next |
-| 4. UI and presets | UI done (moved ahead of 3 for testing); presets and tuner to come |
+| 4. UI and presets | done (ahead of 3, so the plugin could be play-tested): UI, factory presets, tuner |
 | 5. Hardening (pluginval, hosts, profiling) | |
 
-The plugin shifts pitch with the Live engine (1024 samples, 21.3 ms of latency at 48 kHz). Working controls: Playing in, Hear, Shift, Fine, Mix, Output and Bypass. Mode, Formant and Tight exist as parameters but do nothing until milestone 3; the editor shows them as "coming soon".
+The plugin shifts pitch with the Live engine (1024 samples, 21.3 ms of latency at 48 kHz). Working controls: Playing in, Hear, Shift, Fine, Mix, Output and Bypass. Mode, Formant and Tight exist as parameters but do nothing until milestone 3; the editor shows them as "coming soon", and the Studio presets sound like their Live versions until then.
 
-The editor (src/ui) has the Lithium family look (Lithium Drums' colors, fonts and knob). You pick how your guitar is tuned with the Playing in buttons and the tuning you want with the "Tune down to" dial, whose notches are the tunings reachable from yours; each card has a "?" that explains it. Its "You hear" card includes a visualizer: input and output spectra with the open strings of the tuning you hear marked, and the shift actually measured between input and output (it compares the two spectra on a log-frequency axis, so it works on chords), with how many cents it is from what the controls ask for.
+The editor (src/ui) has the Lithium family look (Lithium Drums' colors, fonts and knob). You pick how your guitar is tuned with the Playing in buttons and the tuning you want with the "Tune down to" dial, whose notches are the tunings reachable from yours; each card has a "?" that explains it. The header's preset box holds the factory presets (Eb, D, C#, C and B Standard, Drop C, B and A, Octave Down, each in a Live and a Studio version; hosts list the same 18 as programs); the name gets a "*" once you change a setting it covers. The right card has two tabs. TUNER tunes the guitar itself (before the shift) to the tuning you play in. YOU HEAR includes a visualizer: input and output spectra with the open strings of the tuning you hear marked, and the shift actually measured between input and output (it compares the two spectra on a log-frequency axis, so it works on chords), with how many cents it is from what the controls ask for.
 
 ## Building
 

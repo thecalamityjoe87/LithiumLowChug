@@ -8,6 +8,7 @@ namespace lowchug
 
 HeaderBar::HeaderBar (LowChugProcessor& p)
     : processor (p),
+      presetBar (p),
       bypassAttachment (p.getState(), params::bypass, bypassButton)
 {
     bypassButton.setClickingTogglesState (true);
@@ -17,6 +18,7 @@ HeaderBar::HeaderBar (LowChugProcessor& p)
 
     infoButton.onClick = [this] { if (onShowAbout) onShowAbout(); };
     addAndMakeVisible (infoButton);
+    addAndMakeVisible (presetBar);
 
     latencyText = makeLatencyText();
     startTimerHz (4);
@@ -39,6 +41,24 @@ void HeaderBar::timerCallback()
     }
 }
 
+namespace
+{
+juce::Font productFont()
+{
+    return theme::label (theme::wordmark::productSize, theme::Weight::medium).withExtraKerningFactor (theme::wordmark::tracking);
+}
+juce::Font subtitleFont()
+{
+    return theme::label (theme::wordmark::subtitleSize, theme::Weight::medium).withExtraKerningFactor (theme::wordmark::tracking);
+}
+} // namespace
+
+float HeaderBar::getWordmarkRight() const
+{
+    return (float) theme::space::page + juce::GlyphArrangement::getStringWidth (productFont(), "LOWCHUG") + 10.0f
+           + juce::GlyphArrangement::getStringWidth (subtitleFont(), "GUITAR DETUNER");
+}
+
 void HeaderBar::paint (juce::Graphics& g)
 {
     using namespace theme;
@@ -52,8 +72,8 @@ void HeaderBar::paint (juce::Graphics& g)
     // a baseline, so the two sizes on the second row line up exactly.
     const auto x = (float) space::page;
     const auto brand = label (wordmark::brandSize, Weight::bold).withExtraKerningFactor (wordmark::tracking);
-    const auto product = label (wordmark::productSize, Weight::medium).withExtraKerningFactor (wordmark::tracking);
-    const auto subtitle = label (wordmark::subtitleSize, Weight::medium).withExtraKerningFactor (wordmark::tracking);
+    const auto product = productFont();
+    const auto subtitle = subtitleFont();
 
     g.setColour (colors::text);
     g.setFont (brand);
@@ -67,7 +87,7 @@ void HeaderBar::paint (juce::Graphics& g)
     g.drawSingleLineText ("GUITAR DETUNER", juce::roundToInt (x + productWidth + 10.0f), 50);
 
     // LATENCY over its value, right-aligned, left of Bypass.
-    auto readout = juce::Rectangle<float> ((float) bypassButton.getX() - 120.0f - space::xl, 14.0f, 120.0f, 36.0f);
+    auto readout = latencyArea;
     drawCaption (g, "LATENCY", readout.removeFromTop (14.0f), juce::Justification::centredRight);
     g.setColour (colors::text);
     g.setFont (mono (type::body, Weight::medium));
@@ -80,6 +100,15 @@ void HeaderBar::resized()
     constexpr int iconSize = 30;
     infoButton.setBounds (getWidth() - theme::space::page - iconSize, (getHeight() - iconSize) / 2, iconSize, iconSize);
     bypassButton.setBounds (infoButton.getX() - theme::space::md - 88, (getHeight() - 32) / 2, 88, 32);
+
+    // The latency readout left of Bypass ("21.3 ms" needs about 64 px)...
+    latencyArea = { (float) bypassButton.getX() - theme::space::lg - 64.0f, 14.0f, 64.0f, 36.0f };
+
+    // ...and the presets centered in the space between the wordmark and it.
+    const auto left = juce::roundToInt (getWordmarkRight()) + theme::space::lg;
+    const auto right = juce::roundToInt (latencyArea.getX()) - theme::space::lg;
+    const auto width = std::min (PresetBar::idealWidth, right - left);
+    presetBar.setBounds (left + (right - left - width) / 2, (getHeight() - 32) / 2, width, 32);
 }
 
 } // namespace lowchug

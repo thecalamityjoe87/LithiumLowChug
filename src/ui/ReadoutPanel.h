@@ -2,6 +2,7 @@
 
 #include "Controls.h"
 #include "ShiftAnalyzer.h"
+#include "TunerView.h"
 #include "TuningController.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -38,6 +39,11 @@ public:
     /** Drains the tap and analyzes now (the timer's job; public for tests). */
     void analyzeNow();
 
+    /** Shows the tuner instead of the "You hear" view (the TUNER tab). */
+    void showTuner (bool);
+    bool isShowingTuner() const noexcept { return showingTuner; }
+    TunerView& getTuner() noexcept { return tuner; }
+
 private:
     void timerCallback() override { analyzeNow(); }
     bool isBypassed() const;
@@ -51,6 +57,10 @@ private:
     ShiftAnalyzer::Result result;
     std::vector<float> scratchIn, scratchOut;
     std::atomic<float>* bypassValue = nullptr;
+
+    TabButton hearTab { "You hear" }, tunerTab { "Tuner" };
+    TunerView tuner;
+    bool showingTuner = false;
     HelpButton help;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReadoutPanel)

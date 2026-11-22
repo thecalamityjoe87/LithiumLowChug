@@ -5,6 +5,7 @@
 
 #include "dsp/Detuner.h"
 #include "dsp/EngineConfigs.h"
+#include "dsp/PitchDetector.h"
 #include "dsp/engines/PhaseVocoderEngine.h"
 
 #include <signalsmith-linear/fft.h>
@@ -416,6 +417,55 @@ void testDetunerChannelLinking()
 }
 } // namespace
 
+/** The tuner's pitch detector on plucked-string-like tones: a stack of
+    harmonics that decays, slightly out of tune, as a guitar string would be.
+    `fundamentalLevel` < 1 makes the fundamental weaker than the octave above,
+    as on real low strings, which fools naive detectors into reading an
+    octave high. */
+void testPitchDetector (double sampleRate)
+{
+    struct Case { const char* name; double hz; float fundamentalLevel; };
+    const Case cases[] = {
+        { "D2 (Drop D low string)", 73.42 * std::pow (2.0, 7.0 / 1200.0), 1.0f },
+        { "E2, weak fundamental", 82.41 * std::pow (2.0, -12.0 / 1200.0), 0.3f },
+        { "A2", 110.0 * std::pow (2.0, 3.0 / 1200.0), 1.0f },
+        { "E4 (high string)", 329.63 * std::pow (2.0, -4.0 / 1200.0), 1.0f },
+    };
+
+    PitchDetector detector;
+    detector.prepare (sampleRate);
+    std::vector<float> x ((size_t) detector.getWindowSize());
+
+    for (const auto& c : cases)
+    {
+        const auto start = (int) (0.2 * sampleRate); // 200 ms after the pick
+        for (int i = 0; i < (int) x.size(); ++i)
+        {
+            const double t = (start + i) / sampleRate;
+            double v = 0.0;
+            for (int h = 1; h <= 10; ++h)
+                v += (h == 1 ? c.fundamentalLevel : 1.0f / h) * std::exp (-t * 1.5 * h)
+                     * std::sin (2.0 * std::numbers::pi * c.hz * h * t + h);
+            x[(size_t) i] = (float) (0.3 * v);
+        }
+
+        const auto r = detector.detect (x.data());
+        const auto cents = r.frequency > 0.0f ? 1200.0 * std::log2 (r.frequency / c.hz) : 9999.0;
+        char what[160];
+        std::snprintf (what, sizeof (what), "pitch detector %s at %.0f Hz, cents off", c.name, sampleRate);
+        check (std::abs (cents) < 1.0, what, cents);
+    }
+
+    // Silence and noise: no pitch.
+    std::fill (x.begin(), x.end(), 0.0f);
+    check (detector.detect (x.data()).frequency == 0.0f, "pitch detector: silence has no pitch");
+    std::mt19937 random (7);
+    std::uniform_real_distribution<float> noise (-0.3f, 0.3f);
+    for (auto& v : x)
+        v = noise (random);
+    check (detector.detect (x.data()).frequency == 0.0f, "pitch detector: white noise has no pitch");
+}
+
 int main()
 {
     for (double sampleRate : { 44100.0, 48000.0, 96000.0 })
@@ -432,6 +482,9 @@ int main()
     testDetunerWetLatency();
     testDetunerAutomationClicks();
     testDetunerChannelLinking();
+
+    for (double sampleRate : { 44100.0, 48000.0, 96000.0 })
+        testPitchDetector (sampleRate);
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;

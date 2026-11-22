@@ -76,6 +76,40 @@ void LabeledKnob::resized()
 }
 
 //==============================================================================
+namespace
+{
+juce::Font tabFont() { return theme::label (theme::type::caption, theme::Weight::semibold); }
+constexpr float tabTracking = 0.12f;
+} // namespace
+
+TabButton::TabButton (const juce::String& name) : Button (name)
+{
+    setClickingTogglesState (false); // the owner decides which tab is selected
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+}
+
+int TabButton::getIdealWidth() const
+{
+    return juce::roundToInt (theme::getTrackedTextWidth (getName().toUpperCase(), tabFont(), tabTracking)) + 2;
+}
+
+void TabButton::paintButton (juce::Graphics& g, bool isMouseOver, bool)
+{
+    using namespace theme;
+    const auto on = getToggleState();
+    auto area = getLocalBounds().toFloat();
+
+    g.setColour (on ? colors::text : (isMouseOver ? colors::text.withAlpha (0.85f) : colors::textMuted));
+    drawTrackedText (g, getName().toUpperCase(), tabFont(), tabTracking, area.withTrimmedBottom (3.0f),
+                     juce::Justification::centredLeft);
+    if (on)
+    {
+        g.setColour (colors::accent);
+        g.fillRect (area.removeFromBottom (2.0f));
+    }
+}
+
+//==============================================================================
 InfoButton::InfoButton() : Button ("About")
 {
     setTooltip ("About Lithium LowChug");

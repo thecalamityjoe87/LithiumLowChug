@@ -21,7 +21,8 @@ namespace lowchug
         std::atomic<float>, so the audio thread can read it lock-free while
         the UI or host automation writes it.
 */
-class LowChugProcessor final : public juce::AudioProcessor
+class LowChugProcessor final : public juce::AudioProcessor,
+                               private juce::AsyncUpdater
 {
 public:
     LowChugProcessor();
@@ -56,12 +57,14 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
-    // Programs: factory presets arrive in milestone 4 -----------------------
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
-    void changeProgramName (int, const juce::String&) override {}
+    // Programs: the factory presets (see Presets.h) ---------------------------
+    // Hosts list these in their own preset/program menus; the editor's
+    // preset box uses the same calls.
+    int getNumPrograms() override;
+    int getCurrentProgram() override { return currentProgram.load(); }
+    void setCurrentProgram (int index) override;
+    const juce::String getProgramName (int index) override;
+    void changeProgramName (int, const juce::String&) override {} // factory presets can't be renamed
 
     // State -----------------------------------------------------------------
     void getStateInformation (juce::MemoryBlock& destData) override;
@@ -82,12 +85,20 @@ public:
 
 private:
     static BusesProperties makeBuses();
+
+    // Applies a preset on the message thread (see setCurrentProgram).
+    void handleAsyncUpdate() override;
+    void applyProgram (int index);
     void pushParametersToDsp (bool forceBypass);
     void process (juce::AudioBuffer<float>& buffer, bool forceBypass);
 
     juce::AudioProcessorValueTreeState state;
     dsp::Detuner detuner;
     AnalysisTap analysisTap;
+
+    // The last preset loaded, and one waiting to be applied on the message thread.
+    std::atomic<int> currentProgram;
+    std::atomic<int> pendingProgram { -1 };
 
     // Pointers into the APVTS's atomics, looked up once here rather than by
     // string on every block (a string lookup is a map search). Reading them

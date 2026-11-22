@@ -3,6 +3,7 @@
 
 add_library(lowchug_dsp STATIC
     Detuner.cpp
+    PitchDetector.cpp
     engines/GranularEngine.cpp
     engines/PhaseVocoderEngine.cpp
     engines/SignalsmithEngine.cpp)

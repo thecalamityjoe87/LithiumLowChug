@@ -40,6 +40,7 @@ public:
     // For tests.
     TuningController& getTuningController() noexcept { return controller; }
     TuningPanel& getTuningPanel() noexcept { return tuning; }
+    HeaderBar& getHeader() noexcept { return header; }
     ReadoutPanel& getReadoutPanel() noexcept { return readout; }
     UserSlider& getShiftSlider() noexcept { return shiftKnob.getSlider(); }
 

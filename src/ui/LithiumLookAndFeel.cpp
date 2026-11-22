@@ -381,6 +381,13 @@ void LithiumLookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int width, 
     g.drawRect (0, 0, width, height);
 }
 
+void LithiumLookAndFeel::drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rectangle<int>& area,
+                                                     const juce::String& sectionName)
+{
+    // Section headers ("LIVE", "STUDIO") look like the cards' captions.
+    theme::drawCaption (g, sectionName.toUpperCase(), area.toFloat().reduced (10.0f, 0.0f).withTrimmedTop (4.0f));
+}
+
 void LithiumLookAndFeel::drawTooltip (juce::Graphics& g, const juce::String& text, int width, int height)
 {
     const auto bounds = juce::Rectangle<int> (width, height).toFloat();

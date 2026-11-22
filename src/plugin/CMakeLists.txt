@@ -27,6 +27,7 @@ juce_add_plugin(LithiumLowChug
 target_sources(LithiumLowChug PRIVATE
     Parameters.cpp
     PluginProcessor.cpp
+    Presets.cpp
     StandaloneAudio.cpp
     Tunings.cpp
     ../ui/AboutPanel.cpp
@@ -35,9 +36,11 @@ target_sources(LithiumLowChug PRIVATE
     ../ui/LithiumLookAndFeel.cpp
     ../ui/MainView.cpp
     ../ui/PluginEditor.cpp
+    ../ui/PresetBar.cpp
     ../ui/ReadoutPanel.cpp
     ../ui/ShiftAnalyzer.cpp
     ../ui/TuningController.cpp
+    ../ui/TunerView.cpp
     ../ui/TuningPanel.cpp)
 
 # Every source includes headers relative to src/ ("plugin/...", "ui/...", "dsp/...").

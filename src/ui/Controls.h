@@ -83,6 +83,22 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LabeledKnob)
 };
 
+/** A tab in a small tab row ("YOU HEAR | TUNER"): caption text, an accent
+    underline when selected. As Lithium Drums' tabs, at caption size. */
+class TabButton final : public juce::Button
+{
+public:
+    explicit TabButton (const juce::String& name);
+
+    /** Wide enough for its text. */
+    int getIdealWidth() const;
+
+    void paintButton (juce::Graphics&, bool isMouseOver, bool isButtonDown) override;
+
+private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TabButton)
+};
+
 /** The small round "i" button in the header that opens About, drawn the
     same as Lithium Drums' (a round outline that lights on hover). */
 class InfoButton final : public juce::Button
