@@ -210,7 +210,7 @@ std::string safeName (std::string_view name)
 struct EngineReport
 {
     std::string name, role;
-    double reportedLatencyMs = 0, measuredLatencyMs = 0, impulseLatencyMs = 0;
+    double reportedLatencyMs = 0, impulseLatencyMs = 0, shiftedImpulseLatencyMs = 0;
     double cpuMono = 0, cpuStereo = 0, worstBlock = 0, worstBlock64 = 0, worstBlock32 = 0;
     double maxCentsError = 0, maxRippleDb = 0;
     double variableBlockDiff = 0;
@@ -329,17 +329,26 @@ int main (int argc, char** argv)
         report.reportedLatencyMs = 1000.0 * engine->getLatencySamples() / sampleRate;
 
         {
-            // Exact latency: where an impulse comes out at 0 semitones.
-            Signal impulse ((size_t) sampleRate, 0.0f);
-            impulse[(size_t) (0.25 * sampleRate)] = 1.0f;
-            const auto run = runEngine (*engine, impulse, 1.0, 1, fixedBlocks (hostBlockSize));
-            Signal raw ((size_t) engine->getLatencySamples(), 0.0f);
-            raw.insert (raw.end(), run.aligned.begin(), run.aligned.end());
-            size_t peakIndex = 0;
-            for (size_t i = 0; i < raw.size(); ++i)
-                if (std::abs (raw[i]) > std::abs (raw[peakIndex]))
-                    peakIndex = i;
-            report.impulseLatencyMs = 1000.0 * ((double) peakIndex - 0.25 * sampleRate) / sampleRate;
+            // Latency from where an impulse comes out: exact at 0 semitones.
+            // Shifted (-5 st), the peak moves by a few samples (the shifted
+            // partials no longer all peak at the same instant), so it agrees
+            // with the reported latency to within about 0.3 ms. (This
+            // replaced a cross-correlation of onset envelopes on the corpus,
+            // which the onset mask's reshaped attacks threw off.)
+            const auto impulseLatencyMs = [&] (double ratio) {
+                Signal impulse ((size_t) sampleRate, 0.0f);
+                impulse[(size_t) (0.25 * sampleRate)] = 1.0f;
+                const auto run = runEngine (*engine, impulse, ratio, 1, fixedBlocks (hostBlockSize));
+                Signal raw ((size_t) engine->getLatencySamples(), 0.0f);
+                raw.insert (raw.end(), run.aligned.begin(), run.aligned.end());
+                size_t peakIndex = 0;
+                for (size_t i = 0; i < raw.size(); ++i)
+                    if (std::abs (raw[i]) > std::abs (raw[peakIndex]))
+                        peakIndex = i;
+                return 1000.0 * ((double) peakIndex - 0.25 * sampleRate) / sampleRate;
+            };
+            report.impulseLatencyMs = impulseLatencyMs (1.0);
+            report.shiftedImpulseLatencyMs = impulseLatencyMs (semitonesToRatio (-5));
         }
 
         double lsdKeySum = 0;
@@ -362,10 +371,6 @@ int main (int argc, char** argv)
                     run.cpuPercent = std::min (run.cpuPercent, again.cpuPercent);
                     run.worstBlockPercent = std::min (run.worstBlockPercent, again.worstBlockPercent);
                 }
-                // Measure on the raw (un-aligned) output: re-add the reported latency.
-                Signal raw ((size_t) engine->getLatencySamples(), 0.0f);
-                raw.insert (raw.end(), run.aligned.begin(), run.aligned.end());
-                report.measuredLatencyMs = 1000.0 * measureLatencyByEnvelope (raw, reference, sampleRate, 0.4) / sampleRate;
                 report.cpuMono = run.cpuPercent;
                 report.worstBlock = run.worstBlockPercent;
 
@@ -471,16 +476,16 @@ int main (int argc, char** argv)
        << "Corpus: synthetic DI (" << fmt ("%.1f", corpus.length) << " s), scored against an ideal shifted rendering.\n\n";
 
     md << "## Latency and CPU\n\n"
-       << "| Engine | Reported latency | Impulse (0 st) | Envelope (-5 st) | CPU mono | CPU stereo | Worst block 128 / 64 / 32 | Variable-block diff |\n"
+       << "| Engine | Reported latency | Impulse (0 st) | Impulse (-5 st) | CPU mono | CPU stereo | Worst block 128 / 64 / 32 | Variable-block diff |\n"
        << "|---|---|---|---|---|---|---|---|\n";
     for (const auto& r : reports)
         md << "| " << r.name << " | " << fmt ("%.1f ms", r.reportedLatencyMs) << " | " << fmt ("%.1f ms", r.impulseLatencyMs)
-           << " | " << fmt ("%.1f ms", r.measuredLatencyMs)
+           << " | " << fmt ("%.1f ms", r.shiftedImpulseLatencyMs)
            << " | " << fmt ("%.2f%%", r.cpuMono) << " | " << fmt ("%.2f%%", r.cpuStereo) << " | "
            << fmt ("%.0f%%", r.worstBlock) << " / " << fmt ("%.0f%%", r.worstBlock64) << " / " << fmt ("%.0f%%", r.worstBlock32)
            << " | " << fmt ("%.1e", r.variableBlockDiff) << " |\n";
 
-    md << "\nImpulse latency is exact; the envelope measure (onset cross-correlation on shifted material) is approximate. "
+    md << "\nImpulse latency at 0 st is exact; at -5 st the shifted impulse's peak moves by a few samples (within about 0.3 ms). "
        << "Variable-block diff = peak difference between 128-sample and random 1-512-sample host blocks (0 = buffer-size independent).\n"
        << "CPU = processing time / audio time on one core. Worst block = slowest single "
        << hostBlockSize << "-sample block as a share of its " << fmt ("%.2f", 1000.0 * hostBlockSize / sampleRate)

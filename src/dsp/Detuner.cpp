@@ -1,6 +1,7 @@
 #include "Detuner.h"
 
 #include "EngineConfigs.h"
+#include "Profiling.h"
 
 #include <algorithm>
 #include <cmath>
@@ -165,6 +166,7 @@ bool Detuner::isSwitchingModes() const
 
 void Detuner::process (float* const* channels, int numChannels, int numSamples)
 {
+    LOWCHUG_PROFILE_SCOPE (detuner); // compiled out unless profiling (see Profiling.h)
     numChannels = std::min (numChannels, preparedChannels);
 
     // Hosts may send more than they promised in prepare(); work in chunks
@@ -379,7 +381,11 @@ void Detuner::processChunk (float* const* channels, int numChannels, int n)
     for (int i = 0; i < n; ++i)
     {
         const float u = smoothstep (unity.next());
-        const float m = mix.next(), g = outputGain.next(), b = bypass.next();
+        // Bypass is a switch: its 20 ms fade follows a smoothstep, like the
+        // unity and mode fades, because a linear ramp's corners leave a faint
+        // tick (about -70 dB, audible over Studio's cleaner output). Mix stays
+        // linear: it is a continuous control, and a curve would bend its law.
+        const float m = mix.next(), g = outputGain.next(), b = smoothstep (bypass.next());
         const float s = smoothstep (modeFade.next()); // how much Studio
 
         for (int c = 0; c < numChannels; ++c)

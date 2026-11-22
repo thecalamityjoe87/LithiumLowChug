@@ -304,6 +304,39 @@ public:
             expectWithinAbsoluteError (plain (params::mix), 40.0f, 1.0e-3f);
         }
 
+        // What pluginval's "Plugin state restoration" does: save, move every
+        // parameter to an arbitrary normalized value (a host may send a
+        // switch 0.13, not just 0 or 1), restore, and expect every
+        // getValue() back where it was. A JUCE AudioParameterBool keeps the
+        // raw 0.13 (it reads as "off"), and the APVTS skips restoring a value
+        // that already reads the same, so the raw value used to survive.
+        beginTest ("State restore puts every parameter back, even after a host sent in-between values");
+        {
+            LowChugProcessor p;
+            setParam (p, params::formant, 0.0f);
+            setParam (p, params::bypass, 0.0f);
+            setParam (p, params::mode, 1.0f);
+            juce::MemoryBlock saved;
+            p.getStateInformation (saved);
+
+            std::vector<float> before;
+            for (auto* param : p.getParameters())
+                before.push_back (param->getValue());
+
+            juce::Random random (6);
+            for (auto* param : p.getParameters())
+                param->setValueNotifyingHost (param == p.getState().getParameter (params::formant)
+                                                  ? 0.1305f // the exact value pluginval tripped on
+                                                  : random.nextFloat());
+
+            p.setStateInformation (saved.getData(), (int) saved.getSize());
+            for (size_t i = 0; i < before.size(); ++i)
+            {
+                auto* param = p.getParameters()[(int) i];
+                expectWithinAbsoluteError (param->getValue(), before[i], 1.0e-4f, param->getName (64) + " not restored");
+            }
+        }
+
         beginTest ("Factory presets: 18 programs, Live then Studio, each setting its tuning");
         {
             LowChugProcessor p;

@@ -12,7 +12,7 @@ Formats: VST3, LV2 and Standalone on Linux/Windows/macOS, plus AU on macOS. Made
 | 2. Core DSP | done |
 | 3. Quality features (modes, formants, transients, tight) | done: see the milestone 3 section of the engine evaluation |
 | 4. UI and presets | done (ahead of 3, so the plugin could be play-tested): UI, factory presets, tuner |
-| 5. Hardening (pluginval, hosts, profiling) | next |
+| 5. Hardening (pluginval, hosts, profiling) | done: see [docs/hardening.md](docs/hardening.md); the host checks in [docs/host-checklist.md](docs/host-checklist.md) are run by hand |
 
 Two modes, switched with the Live | Studio buttons or the presets. Live has 1024 samples (21.3 ms) of latency at 48 kHz, for playing through; Studio has 2304 samples (48.0 ms) and the cleanest low end, for recording and mixing. Hosts are told the new latency when you switch, and the sound crossfades once the other engine has warmed up (about a quarter of a second). Formant keeps the guitar's tone in place as the pitch drops (off is the classic pitch pedal sound); Tight is a gentle low cut that follows the shift.
 
@@ -38,16 +38,25 @@ To see the editor without a host, the plugin tests can save PNG snapshots of it:
 LOWCHUG_SNAPSHOT_DIR=/tmp ./build/release/tests/lowchug-plugin-tests
 ```
 
-[pluginval](https://github.com/Tracktion/pluginval) passes at strictness 5 for the VST3 and LV2:
+[pluginval](https://github.com/Tracktion/pluginval) passes at strictness 10 (the highest) for the VST3 and the LV2, and Steinberg's VST3 validator passes all its tests:
 
 ```bash
-pluginval --strictness-level 5 --validate "$HOME/.vst3/Lithium LowChug.vst3"
+pluginval --strictness-level 10 --validate "$HOME/.vst3/Lithium LowChug.vst3"
+pluginval --strictness-level 10 --validate "$HOME/.lv2/Lithium LowChug.lv2"
+vst3-validator -e "$HOME/.vst3/Lithium LowChug.vst3"   # the "validator" tool built from the VST3 SDK
+```
+
+`ctest` runs three test programs: the DSP tests, a bounds-checked stress test of the DSP code, and the plugin tests. For CPU numbers, run the profiler (see [docs/hardening.md](docs/hardening.md)):
+
+```bash
+./build/release/tools/profile/lowchug-profile          # average CPU and worst blocks
+./build/release/tools/profile/lowchug-profile-stages   # where the time goes
 ```
 
 | Option | Default | Builds |
 |---|---|---|
 | `LOWCHUG_BUILD_PLUGIN` | ON | the JUCE plugin |
-| `LOWCHUG_BUILD_TOOLS` | ON | the engine A/B harness |
+| `LOWCHUG_BUILD_TOOLS` | ON | the engine A/B harness and the CPU profiler |
 | `LOWCHUG_BUILD_TESTS` | ON | the unit tests |
 
 For quick DSP-only work, skip JUCE entirely:
@@ -64,13 +73,15 @@ src/dsp/            plugin-independent DSP (plain C++, no JUCE)
   Detuner.h             the complete effect: engine, dry delay, glide, mix, gain, bypass
   PitchShiftEngine.h    the swappable engine interface
   EngineConfigs.h       the Live and Studio engine settings (Detuner holds one engine of each)
+  Profiling.h           opt-in stage timers for the profiler (compiled out of the plugin)
   engines/              PhaseVocoderEngine (chosen), SignalsmithEngine, GranularEngine (reference)
 src/plugin/         JUCE wrapper: processor, parameters, tuning model, analysis tap, standalone audio setup
 src/ui/             the editor: Lithium look and feel, panels, tuning sync (TuningController), shift analyzer
 assets/fonts/       Barlow, Barlow Condensed, IBM Plex Mono (compiled into the plugin)
 tools/engine-eval/  engine A/B harness: synthetic DI corpus, metrics, WAV renders
-tests/              DSP tests (no JUCE) and plugin tests (JUCE UnitTest)
-docs/               engine evaluation report
+tools/profile/      CPU profiler: the whole effect, average CPU, worst blocks, time per stage
+tests/              DSP tests (no JUCE), bounds-checked DSP stress tests, plugin tests (JUCE UnitTest)
+docs/               engine evaluation, hardening report (validation, profiling, tests), host checklist
 ```
 
 `src/dsp` depends only on the standard library and the header-only Signalsmith libraries. That way it can be used as a built-in effect in another host without the plugin wrapper.

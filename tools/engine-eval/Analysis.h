@@ -74,46 +74,6 @@ inline double envelopeRippleDb (const Signal& signal, size_t start, size_t lengt
     return 20.0 * std::log10 ((hi + 1e-12) / (lo + 1e-12));
 }
 
-/** Measures latency by cross-correlating smoothed envelopes of output and
-    reference. Resolution: `decimation` samples. Works for shifted signals
-    (where waveform correlation doesn't), because onsets line up. */
-inline int measureLatencyByEnvelope (const Signal& output, const Signal& reference, double sampleRate, double maxLatencySeconds)
-{
-    const int decimation = 8;
-    auto envelope = [&] (const Signal& s) {
-        std::vector<double> env (s.size() / decimation);
-        double state = 0;
-        const double coeff = std::exp (-1.0 / (0.001 * sampleRate));
-        for (size_t i = 0; i < env.size() * decimation; ++i)
-        {
-            state = std::max (std::abs ((double) s[i]), state * coeff);
-            if (i % decimation == 0)
-                env[i / decimation] = state;
-        }
-        // High-pass the envelope (differentiate) so onsets dominate.
-        for (size_t i = env.size() - 1; i > 0; --i)
-            env[i] = std::max (0.0, env[i] - env[i - 1]);
-        return env;
-    };
-
-    const auto a = envelope (output), b = envelope (reference);
-    const int maxLag = (int) (maxLatencySeconds * sampleRate / decimation);
-    int bestLag = 0;
-    double best = -1;
-    for (int lag = 0; lag < maxLag; ++lag)
-    {
-        double sum = 0;
-        for (size_t i = 0; i + (size_t) lag < a.size() && i < b.size(); ++i)
-            sum += a[i + (size_t) lag] * b[i];
-        if (sum > best)
-        {
-            best = sum;
-            bestLag = lag;
-        }
-    }
-    return bestLag * decimation;
-}
-
 /** Mean log-spectral distance (dB) between output and reference over
     [start, end) seconds, 40 Hz - 8 kHz. Frames where the reference is
     silent are skipped. Lower is better; it rises with smearing, phasiness,

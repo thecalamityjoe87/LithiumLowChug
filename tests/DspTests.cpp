@@ -10,13 +10,16 @@
 
 #include <signalsmith-linear/fft.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <numbers>
 #include <random>
+#include <string_view>
 #include <vector>
 
 using namespace lowchug::dsp;
@@ -723,6 +726,56 @@ void testTight()
     }
 }
 
+void testSwitchClicks()
+{
+    // The on/off controls, switched on a playing chord, add no click:
+    // Formant (each partial's gain changes), Bypass and Mix (crossfades to
+    // the delayed dry signal). Measured like the other click tests: treble
+    // above the steady residue of the same run without the switching.
+    //
+    // Mix ramps linearly (a continuous control; a curve would bend its law),
+    // and a ramp's corners leave a faint tick. Studio's steady residue is
+    // far below it, so a full 100 -> 0 % jump is held to an absolute bound
+    // instead: below -65 dB re the signal (it measures about -70).
+    const double sampleRate = 48000.0;
+    const Stereo chord { lowChord (2.4, sampleRate) };
+    struct Control { const char* name; std::function<void (Detuner&, bool)> set; };
+    const Control controls[] = {
+        { "Formant off -> on -> off", [] (Detuner& d, bool on) { d.setFormantPreservation (on); } },
+        { "Bypass off -> on -> off", [] (Detuner& d, bool on) { d.setBypassed (on); } },
+        { "Mix 100 % -> 0 % -> 100 %", [] (Detuner& d, bool on) { d.setMix (on ? 0.0f : 1.0f); } },
+    };
+    for (const auto& control : controls)
+        for (auto mode : { Detuner::Mode::live, Detuner::Mode::studio })
+        {
+            auto run = [&] (bool automate)
+            {
+                Detuner d;
+                d.setMode (mode);
+                d.setShiftSemitones (-7.0f);
+                d.prepare (sampleRate, 512, 1);
+                return runDetuner (d, chord, randomBlocks (12), [&] (size_t pos) {
+                    if (automate)
+                        control.set (d, pos > (size_t) (0.8 * sampleRate) && pos < (size_t) (1.6 * sampleRate));
+                })[0];
+            };
+            const double switched = worstClickDb (run (true), (size_t) (0.4 * sampleRate), sampleRate);
+            const double steady = std::max (worstClickDb (run (false), (size_t) (0.4 * sampleRate), sampleRate), -90.0);
+            const bool isMix = std::string_view (control.name).starts_with ("Mix");
+            char what[160];
+            if (isMix && switched - steady >= 3.0)
+            {
+                std::snprintf (what, sizeof (what), "%s: %s: any tick stays below -65 dB re the signal (dB)", modeName (mode), control.name);
+                check (switched < -65.0, what, switched);
+            }
+            else
+            {
+                std::snprintf (what, sizeof (what), "%s: %s adds no click (dB above steady residue)", modeName (mode), control.name);
+                check (switched - steady < 3.0, what, switched - steady);
+            }
+        }
+}
+
 void testNoPreEcho()
 {
     // A note can't sound before it's played. A low E picked after silence,
@@ -741,13 +794,31 @@ void testNoPreEcho()
         }
     }
 
+    // Also after a NaN 0.7 s before the pick (long gone from every window):
+    // a host or an upstream plugin can send one, and it must not leave
+    // anything broken behind, such as onset detection that never fires
+    // again (the detector is a recursive filter, which would keep a NaN
+    // forever).
+    for (bool afterNaN : { false, true })
     for (auto [name, config] : { std::pair { "Live", liveConfig() }, std::pair { "Studio", studioConfig() } })
     {
+        auto input = pluck;
+        if (afterNaN)
+            input[(size_t) (0.1 * sampleRate)] = std::numeric_limits<float>::quiet_NaN();
+
         PhaseVocoderEngine engine (config);
-        auto out = runEngine (engine, pluck, sampleRate, (float) std::exp2 (-5.0 / 12.0), [] { return 128; });
+        auto out = runEngine (engine, input, sampleRate, (float) std::exp2 (-5.0 / 12.0), [] { return 128; });
         // Remove the latency: output sample i + latency belongs to input sample i.
         out.erase (out.begin(), out.begin() + engine.getLatencySamples());
         out.resize (pluck.size(), 0.0f);
+
+        if (afterNaN)
+        {
+            const auto nonFinite = std::count_if (out.begin(), out.end(), [] (float v) { return ! std::isfinite (v); });
+            char what[160];
+            std::snprintf (what, sizeof (what), "%s: a NaN in the input never reaches the output (non-finite samples)", name);
+            check (nonFinite == 0, what, (double) nonFinite);
+        }
 
         const double w = 2.0 * std::numbers::pi * 2000.0 / sampleRate, alpha = std::sin (w) / (2.0 * 0.7071), cw = std::cos (w);
         const double a0 = 1.0 + alpha, b0 = (1.0 + cw) / 2.0 / a0, b1 = -(1.0 + cw) / a0, a1 = -2.0 * cw / a0, a2 = (1.0 - alpha) / a0;
@@ -771,7 +842,8 @@ void testNoPreEcho()
         };
         const double preEcho = 10.0 * std::log10 (energy (-0.040, -0.004) / energy (0.0, 0.020));
         char what[160];
-        std::snprintf (what, sizeof (what), "%s: no pre-echo before a pick (treble 40-4 ms before, dB re the attack)", name);
+        std::snprintf (what, sizeof (what), "%s: no pre-echo before a pick%s (treble 40-4 ms before, dB re the attack)", name,
+                       afterNaN ? ", 0.7 s after a NaN" : "");
         check (preEcho < -60.0, what, preEcho);
     }
 }
@@ -878,6 +950,7 @@ int main()
     testTrebleResidue();
     testFormant();
     testTight();
+    testSwitchClicks();
     testNoPreEcho();
     testCpu();
 

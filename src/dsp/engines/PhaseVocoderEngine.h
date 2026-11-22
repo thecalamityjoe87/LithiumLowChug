@@ -115,6 +115,7 @@ private:
     void analyzeFrame();
     bool detectTransient();
     void findPeaksAndRegions();
+    void measurePeakFrequencies();
     void computeEnvelope();
     void computeRegionShifts (bool resetPhases, bool markOnsets);
     void detectOnsets (const float* const* input, int numChannels, int numSamples);
@@ -180,8 +181,9 @@ private:
     std::vector<ChannelState> channels;
 
     // Analysis shared by all channels.
-    std::vector<Complex> sumSpectrum;
-    std::vector<float> magnitude, previousPhase, trueBin;
+    std::vector<Complex> sumSpectrum, previousSumSpectrum; // this frame's and the last
+    std::vector<float> magnitude;
+    std::vector<float> trueBin; // measured frequency, in bins; valid at this frame's peak bins only
     std::vector<float> previousMagnitude, preOnsetMagnitude;
     std::vector<float> rotation, previousRotation; // per input bin
     std::vector<float> logEnvelope, envelopeScratch; // for formant preservation

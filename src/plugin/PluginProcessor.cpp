@@ -301,6 +301,22 @@ void LowChugProcessor::setStateInformation (const void* data, int sizeInBytes)
         {
             state.replaceState (juce::ValueTree::fromXml (*xml));
 
+            // replaceState() only pushes a value into a parameter when it
+            // differs from what the parameter currently reads. A JUCE
+            // AudioParameterBool keeps whatever raw value a host sent (0.13
+            // reads as "off"), so after restoring "off" it would still report
+            // 0.13 to the host. Push every value the tree now holds once more,
+            // where the parameter's raw value disagrees with it. (Message
+            // thread, like the rest of setStateInformation; it notifies the
+            // host just as replaceState itself does.)
+            for (auto* parameter : getParameters())
+                if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter))
+                {
+                    const float restored = ranged->convertTo0to1 (state.getRawParameterValue (ranged->paramID)->load());
+                    if (! juce::approximatelyEqual (ranged->getValue(), restored))
+                        ranged->setValueNotifyingHost (restored);
+                }
+
             // Which preset was loaded (older sessions don't say: keep the default).
             const int program = state.state.getProperty ("program", presets::defaultPreset);
             currentProgram = juce::jlimit (0, presets::numPresets - 1, program);

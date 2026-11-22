@@ -1,5 +1,7 @@
 #include "PhaseVocoderEngine.h"
 
+#include "../Profiling.h"
+
 #include <signalsmith-linear/fft.h>
 
 #include <algorithm>
@@ -92,7 +94,7 @@ void PhaseVocoderEngine::prepare (double newSampleRate, int /*maxBlockSize*/, in
     maskBaseMagnitude.assign ((size_t) numBins, 0.0f);
     // 25 ms of detector blocks (32 samples at 48 kHz, scaled like the FFT).
     onsetHistory.assign ((size_t) std::max (1, (int) std::lround (0.025 * sampleRate / std::max (16, 32 * fftSize / config.fftSize))), 0.0f);
-    previousPhase.resize ((size_t) numBins);
+    previousSumSpectrum.resize ((size_t) numBins);
     trueBin.resize ((size_t) numBins);
     rotation.resize ((size_t) numBins);
     previousRotation.resize ((size_t) numBins);
@@ -187,7 +189,8 @@ void PhaseVocoderEngine::reset()
     framePending = false;
     frameChannels = 0;
     stepsDone = 0;
-    std::fill (previousPhase.begin(), previousPhase.end(), 0.0f);
+    std::fill (sumSpectrum.begin(), sumSpectrum.end(), Complex {});
+    std::fill (previousSumSpectrum.begin(), previousSumSpectrum.end(), Complex {});
     std::fill (previousRotation.begin(), previousRotation.end(), 0.0f);
     std::fill (previousMagnitude.begin(), previousMagnitude.end(), 0.0f);
     std::fill (previousCleanedAtBin.begin(), previousCleanedAtBin.end(), Complex {});
@@ -221,6 +224,7 @@ void PhaseVocoderEngine::reset()
 void PhaseVocoderEngine::process (const float* const* input, float* const* output,
                                   int numChannelsToProcess, int numSamples)
 {
+    LOWCHUG_PROFILE_SCOPE (buffering); // compiled out unless profiling (see Profiling.h)
     const int writeStart = fftSize - hop;
     const int channelCount = std::min (numChannelsToProcess, numChannels);
     activeChannels = channelCount;
@@ -233,7 +237,15 @@ void PhaseVocoderEngine::process (const float* const* input, float* const* outpu
         for (int c = 0; c < channelCount; ++c)
         {
             auto& ch = channels[(size_t) c];
-            std::copy (input[c] + i, input[c] + i + n, ch.inFifo.begin() + rover);
+            // A NaN or infinity from the host (or a broken plugin before us)
+            // counts as silence: once in the analysis it would poison every
+            // frame it touches, and the spectra and phases kept from frame
+            // to frame. (Milestone 5.)
+            for (int j = 0; j < n; ++j)
+            {
+                const float x = input[c][i + j];
+                ch.inFifo[(size_t) (rover + j)] = std::isfinite (x) ? x : 0.0f;
+            }
             std::copy (ch.outFifo.begin() + (rover - writeStart), ch.outFifo.begin() + (rover - writeStart) + n, output[c] + i);
         }
         if (config.onsetMask)
@@ -301,6 +313,7 @@ bool PhaseVocoderEngine::copyChannelState (int from, int to)
 
 void PhaseVocoderEngine::detectOnsets (const float* const* input, int count, int numSamples)
 {
+    LOWCHUG_PROFILE_SCOPE (onsetDetector);
     // Pick attacks, found in the time domain, where their timing is sharp:
     // the energy above 2 kHz in short blocks (32 samples at 48 kHz),
     // compared with the loudest block of the last 25 ms. A long analysis
@@ -316,6 +329,8 @@ void PhaseVocoderEngine::detectOnsets (const float* const* input, int count, int
         for (int c = 0; c < count; ++c)
             x += input[c][i];
         x /= (float) count;
+        if (! std::isfinite (x))
+            x = 0.0f; // the high-pass below is recursive: a NaN would stay in it forever, and no onset would ever be found again
         const float y = d.b0 * x + d.b1 * d.x1 + d.b2 * d.x2 - d.a1 * d.y1 - d.a2 * d.y2;
         d.x2 = d.x1; d.x1 = x; d.y2 = d.y1; d.y1 = y;
         d.highEnergy += y * y;
@@ -388,6 +403,7 @@ void PhaseVocoderEngine::runStep (int step)
 {
     if (step < frameChannels)
     {
+        LOWCHUG_PROFILE_SCOPE (forwardFft);
         auto& ch = channels[(size_t) step];
         fft->fft.fft (ch.frame.data(), ch.spectrum.data());
         ch.spectrum[0] = { ch.spectrum[0].real(), 0.0f }; // drop the packed Nyquist bin
@@ -417,6 +433,7 @@ void PhaseVocoderEngine::emitHop()
 
 void PhaseVocoderEngine::analyzeFrame()
 {
+    LOWCHUG_PROFILE_SCOPE (analysis);
     analyzeSharedSpectrum();
 
     // An onset first shows up faintly at the window's edge. Its phases are
@@ -460,6 +477,7 @@ void PhaseVocoderEngine::analyzeFrame()
     std::copy (magnitude.begin(), magnitude.end(), previousMagnitude.begin());
 
     findPeaksAndRegions();
+    measurePeakFrequencies();
     computeRegionShifts (resetNow, masking);
 }
 
@@ -468,27 +486,41 @@ void PhaseVocoderEngine::analyzeSharedSpectrum()
     // The average of the frame's channels (not the sum): identical channels
     // then analyze exactly like one, so linking them (processing just one,
     // see Detuner) or unlinking them never changes a level the analysis
-    // compares from frame to frame.
+    // compares from frame to frame. The last frame's spectrum is kept for
+    // measurePeakFrequencies.
+    std::swap (sumSpectrum, previousSumSpectrum);
     std::fill (sumSpectrum.begin(), sumSpectrum.end(), Complex {});
     const float perChannel = 1.0f / (float) std::max (1, frameChannels);
     for (int c = 0; c < frameChannels; ++c)
         for (int k = 0; k < numBins; ++k)
             sumSpectrum[(size_t) k] += channels[(size_t) c].spectrum[(size_t) k] * perChannel;
 
-    // The phase advance between frames gives each bin's true frequency, far
-    // more precisely than the bin spacing.
-    const float expectedAdvancePerBin = twoPi * (float) hop / (float) fftSize;
-    const float binsPerRadian = (float) fftSize / (twoPi * (float) hop);
-
     for (int k = 0; k < numBins; ++k)
-    {
-        const auto value = sumSpectrum[(size_t) k];
-        const float phase = std::arg (value);
-        magnitude[(size_t) k] = std::abs (value);
+        magnitude[(size_t) k] = std::abs (sumSpectrum[(size_t) k]);
+}
 
-        const float deviation = wrapPhase (phase - previousPhase[(size_t) k] - expectedAdvancePerBin * (float) k);
-        trueBin[(size_t) k] = (float) k + deviation * binsPerRadian;
-        previousPhase[(size_t) k] = phase;
+void PhaseVocoderEngine::measurePeakFrequencies()
+{
+    // The phase advance between frames gives each peak's true frequency, far
+    // more precisely than the bin spacing. Everything downstream reads it
+    // at peak bins only, so it is measured there only: one atan2 per peak
+    // instead of one per bin (milestone 5; the per-bin version was most of
+    // the analysis time).
+    //
+    // The advance is arg(now x conj(before)), the same as arg(now) -
+    // arg(before) wrapped. A bin that was exactly zero last frame (after a
+    // reset, or silence) counts as phase 0, as std::arg(0) gives. Double
+    // precision, so the product can't underflow for very quiet peaks.
+    const double expectedAdvancePerBin = 2.0 * std::numbers::pi * (double) hop / (double) fftSize;
+    const double binsPerRadian = 1.0 / expectedAdvancePerBin;
+
+    for (const auto& region : regions)
+    {
+        const auto k = (size_t) region.peak;
+        const std::complex<double> now = sumSpectrum[k], before = previousSumSpectrum[k];
+        const double advance = std::norm (before) > 0.0 ? std::arg (now * std::conj (before)) : std::arg (now);
+        const double deviation = std::remainder (advance - expectedAdvancePerBin * (double) k, 2.0 * std::numbers::pi);
+        trueBin[k] = (float) ((double) k + deviation * binsPerRadian);
     }
 }
 
@@ -566,6 +598,7 @@ void PhaseVocoderEngine::findPeaksAndRegions()
 
 void PhaseVocoderEngine::computeEnvelope()
 {
+    LOWCHUG_PROFILE_SCOPE (formant);
     // The spectral envelope, in natural-log magnitude: the shape the body,
     // pickups and cabinet give the spectrum, as opposed to the partials
     // themselves. Drawn through the real partials only: straight lines (in
@@ -720,6 +753,7 @@ void PhaseVocoderEngine::computeRegionShifts (bool resetPhases, bool markOnsets)
 
 void PhaseVocoderEngine::synthesizeChannel (int channelIndex)
 {
+    LOWCHUG_PROFILE_SCOPE (regionShift);
     auto& ch = channels[(size_t) channelIndex];
     std::fill (ch.shifted.begin(), ch.shifted.end(), Complex {});
 
@@ -765,14 +799,20 @@ void PhaseVocoderEngine::synthesizeChannel (int channelIndex)
     if (useModel)
         addPartials (ch.shifted, anyOnset ? &ch.onsetShifted : nullptr);
 
-    fft->fft.ifft (ch.shifted.data(), timeBuffer.data());
+    {
+        LOWCHUG_PROFILE_SCOPE (inverseFft);
+        fft->fft.ifft (ch.shifted.data(), timeBuffer.data());
+    }
 
     // Only the last synthesisSize samples of the frame are non-zero after the
     // synthesis window; overlap-add those.
     const int first = fftSize - synthesisSize;
-    for (int i = first; i < fftSize; ++i)
-        ch.outAccumulator[(size_t) (i - first)] += timeBuffer[(size_t) ((i - windowPeak) & (fftSize - 1))]
-                                                   * synthesisWindow[(size_t) i] * outputScale;
+    {
+        LOWCHUG_PROFILE_SCOPE (overlapAdd);
+        for (int i = first; i < fftSize; ++i)
+            ch.outAccumulator[(size_t) (i - first)] += timeBuffer[(size_t) ((i - windowPeak) & (fftSize - 1))]
+                                                       * synthesisWindow[(size_t) i] * outputScale;
+    }
 
     if (anyOnset)
     {
@@ -783,7 +823,11 @@ void PhaseVocoderEngine::synthesizeChannel (int channelIndex)
         // pre-echo. A note can't sound before it is played, so the onset's
         // part fades in only from 4 ms before the onset (pre-echo that close
         // is masked by the attack itself), reaching full level 1 ms before.
-        fft->fft.ifft (ch.onsetShifted.data(), onsetTimeBuffer.data());
+        {
+            LOWCHUG_PROFILE_SCOPE (inverseFft);
+            fft->fft.ifft (ch.onsetShifted.data(), onsetTimeBuffer.data());
+        }
+        LOWCHUG_PROFILE_SCOPE (overlapAdd);
         const float fadeStart = onsetTime - 0.004f * sampleRate, fadeEnd = onsetTime - 0.001f * sampleRate;
         for (int i = first; i < fftSize; ++i)
         {
@@ -927,6 +971,7 @@ void PhaseVocoderEngine::addLobe (std::vector<Complex>& target, Complex amplitud
 
 void PhaseVocoderEngine::selectModeledPartials()
 {
+    LOWCHUG_PROFILE_SCOPE (partialModel);
     // The partials worth modeling: real peaks (a sidelobe region reports a
     // partial elsewhere, far from its own peak bin), low enough that their
     // lobes and mirrors cross other regions or reach DC, not so close to DC
@@ -1036,6 +1081,7 @@ void PhaseVocoderEngine::solveAmplitudes (const std::vector<Complex>& spectrum, 
 
 void PhaseVocoderEngine::refinePartialFrequencies()
 {
+    LOWCHUG_PROFILE_SCOPE (partialModel);
     // The phase vocoder measures a partial's frequency from how its peak
     // bin's phase advances from frame to frame. Where a neighbor's lobe
     // overlaps that bin, the neighbor pulls the reading off by up to a third
@@ -1083,6 +1129,7 @@ void PhaseVocoderEngine::refinePartialFrequencies()
 
 void PhaseVocoderEngine::subtractPartials (const std::vector<Complex>& spectrum)
 {
+    LOWCHUG_PROFILE_SCOPE (partialModel);
     solveAmplitudes (spectrum, false);
     std::copy (spectrum.begin(), spectrum.end(), residual.begin());
     for (size_t i = 0; i < modeled.size(); ++i)
@@ -1091,6 +1138,7 @@ void PhaseVocoderEngine::subtractPartials (const std::vector<Complex>& spectrum)
 
 void PhaseVocoderEngine::addPartials (std::vector<Complex>& shifted, std::vector<Complex>* onsetShifted) const
 {
+    LOWCHUG_PROFILE_SCOPE (partialModel);
     for (size_t i = 0; i < modeled.size(); ++i)
     {
         const auto& region = regions[(size_t) modeled[i]];

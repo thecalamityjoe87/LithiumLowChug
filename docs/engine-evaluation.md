@@ -113,6 +113,15 @@ What changed, and why:
 4. **Formant preservation.** The spectral envelope is drawn through the real partials only (sidelobe peaks and anything 70 dB down skipped) and smoothed over about +/-150 Hz; each partial takes on the envelope's level where it lands (up to +/-18 dB). On a tone shaped by 600 Hz and 2.4 kHz resonances, shifted -7 st: with formant off the harmonics follow the moved resonances within 0.2 dB; with it on they follow the original resonances within 0.7 dB. Cost: about 0.1 % CPU in Live.
 5. **Tight** (in `Detuner`, not the engine): on the shifted signal, a 12 dB/octave high-pass at up to 0.9 x where the low E lands, plus a low shelf of up to -6 dB at 2.5 x that note, scaling with the amount (state-variable filters, settings interpolated per sample, 150 ms glide, so automating it never clicks). At 100 % an octave below the shifted low E is cut by about 17 dB; the upper range is untouched.
 
+## Milestone 5 update
+
+Hardening; details in [hardening.md](hardening.md). Two engine changes, both measured with `lowchug-engine-eval --engines shipping`:
+
+- **Peak frequencies are measured at peaks only.** The phase advance that gives each partial's true frequency used to be computed with an `atan2` for every bin of every frame, but everything downstream reads it only at peak bins. It is now measured once per peak, as arg(X_now x conj(X_before)) (the same quantity). The quality tables of the report are identical to the last digit; CPU fell from 2.46 to 1.95 % (Live, mono) and 4.03 to 3.03 % (Studio, mono), and the worst block at 128 / 64 / 32-sample buffers is now 6 / 12 / 25 % (Live) and 9 / 18 / 41 % (Studio, engine only; the profiler's numbers for the whole effect are in hardening.md).
+- **NaN and infinity in the input count as silence.** One NaN used to stay in the onset detector's recursive filter forever, which silently switched the onset mask (pre-echo protection) off for the rest of the session.
+
+The harness's "Envelope (-5 st)" latency column (a cross-correlation of onset envelopes, which the onset mask's reshaped attacks threw off: it read 37 ms for Live) is replaced by "Impulse (-5 st)", the peak of a shifted impulse: 21.1 ms for Live and 47.8 ms for Studio, against 21.3 and 48.0 ms reported (the shifted partials no longer peak at quite the same instant).
+
 ## Open issues for later milestones
 
 1. **Pick attack (fixed in milestone 3, see above).** Our PV shows some treble smear after each pick, and an attack peak above 2 kHz that is 6 to 16 dB hotter than ideal. The cause: each spectral region's phase advances independently from frame to frame. That is correct for sustained partials, but it scatters the energy of an attack that is still inside the long analysis window. The current transient phase reset helps the attack frame only. Signalsmith avoids this by also predicting phase across frequency. Planned fix: propagate phase across frequency at onsets (in the style of phase-gradient heap integration), and consider splitting Studio into a long window for the lows and a short one for the highs.

@@ -3,6 +3,21 @@ add_executable(lowchug-dsp-tests DspTests.cpp)
 target_link_libraries(lowchug-dsp-tests PRIVATE lowchug_dsp signalsmith-linear)
 add_test(NAME dsp COMMAND lowchug-dsp-tests)
 
+# Stress tests on a copy of the DSP code compiled with the standard library's
+# bounds checks switched on, so an out-of-range read stops the test even in a
+# release build (see CheckedDspTests.cpp). Each define only affects its own
+# standard library and is ignored by the others.
+add_executable(lowchug-dsp-checked-tests
+    CheckedDspTests.cpp
+    ${PROJECT_SOURCE_DIR}/src/dsp/Detuner.cpp
+    ${PROJECT_SOURCE_DIR}/src/dsp/engines/PhaseVocoderEngine.cpp)
+target_include_directories(lowchug-dsp-checked-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(lowchug-dsp-checked-tests PRIVATE signalsmith-linear)
+target_compile_definitions(lowchug-dsp-checked-tests PRIVATE
+    _GLIBCXX_ASSERTIONS                                     # libstdc++ (GCC)
+    _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE) # libc++ (Clang, macOS)
+add_test(NAME dsp-checked COMMAND lowchug-dsp-checked-tests)
+
 # Plugin tests: instantiate the real processor through JUCE.
 if(LOWCHUG_BUILD_PLUGIN)
     add_executable(lowchug-plugin-tests PluginTests.cpp)

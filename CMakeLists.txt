@@ -18,7 +18,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(LOWCHUG_BUILD_PLUGIN "Build the JUCE plugin (VST3/LV2/AU/Standalone)" ON)
-option(LOWCHUG_BUILD_TOOLS  "Build the engine A/B evaluation harness" ON)
+option(LOWCHUG_BUILD_TOOLS  "Build the engine A/B evaluation harness and the CPU profiler" ON)
 option(LOWCHUG_BUILD_TESTS  "Build the unit tests (run with ctest)" ON)
 option(LOWCHUG_COPY_PLUGINS "Copy built plugins to the user plugin folders" OFF)
 
@@ -52,6 +52,7 @@ endif()
 
 if(LOWCHUG_BUILD_TOOLS)
     add_subdirectory(tools/engine-eval)
+    add_subdirectory(tools/profile)
 endif()
 
 if(LOWCHUG_BUILD_TESTS)
