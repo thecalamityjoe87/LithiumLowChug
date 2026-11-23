@@ -3,6 +3,17 @@ if(APPLE)
     list(APPEND lowchug_formats AU)
 endif()
 
+# The app icon (drawn by tools/icongen, see scripts/make-icons.sh): the
+# standalone app's icon on Windows and macOS, and the AU's on macOS. Only
+# passed when the files exist, so a checkout without them still builds.
+set(lowchug_icons)
+set(lowchug_icon_dir ${PROJECT_SOURCE_DIR}/assets/icon)
+if(EXISTS ${lowchug_icon_dir}/icon-1024.png AND EXISTS ${lowchug_icon_dir}/icon-256.png)
+    set(lowchug_icons
+        ICON_BIG   ${lowchug_icon_dir}/icon-1024.png
+        ICON_SMALL ${lowchug_icon_dir}/icon-256.png)
+endif()
+
 juce_add_plugin(LithiumLowChug
     PRODUCT_NAME                "${LOWCHUG_PRODUCT_NAME}"
     DESCRIPTION                 "${LOWCHUG_DESCRIPTION}"
@@ -13,6 +24,7 @@ juce_add_plugin(LithiumLowChug
     PLUGIN_MANUFACTURER_CODE    "${LOWCHUG_MANUFACTURER_CODE}"
     PLUGIN_CODE                 "${LOWCHUG_PLUGIN_CODE}"
     FORMATS                     ${lowchug_formats}
+    ${lowchug_icons}
     IS_SYNTH                    FALSE
     NEEDS_MIDI_INPUT            FALSE
     NEEDS_MIDI_OUTPUT           FALSE

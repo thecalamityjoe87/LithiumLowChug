@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(LithiumLowChug VERSION 0.1.0 LANGUAGES C CXX)
+project(LithiumLowChug VERSION 0.5.0 LANGUAGES C CXX)
 
 if(APPLE)
     # JUCE's macOS sources are Objective-C++.
@@ -48,11 +48,21 @@ add_subdirectory(src/dsp)
 
 if(LOWCHUG_BUILD_PLUGIN)
     add_subdirectory(src/plugin)
+
+    # The graphical installer in the Linux download (scripts/package.sh).
+    if(UNIX AND NOT APPLE)
+        add_subdirectory(tools/installer)
+    endif()
 endif()
 
 if(LOWCHUG_BUILD_TOOLS)
     add_subdirectory(tools/engine-eval)
     add_subdirectory(tools/profile)
+
+    # Draws the icon and installer artwork; uses JUCE, so needs the plugin build.
+    if(LOWCHUG_BUILD_PLUGIN)
+        add_subdirectory(tools/icongen)
+    endif()
 endif()
 
 if(LOWCHUG_BUILD_TESTS)

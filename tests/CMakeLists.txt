@@ -34,4 +34,19 @@ if(LOWCHUG_BUILD_PLUGIN)
     target_compile_definitions(lowchug-plugin-tests PRIVATE
         $<TARGET_PROPERTY:LithiumLowChug,COMPILE_DEFINITIONS>)
     add_test(NAME plugin COMMAND lowchug-plugin-tests)
+
+    # The Linux installer's logic (tools/installer/Installation.cpp): paths,
+    # parts, install / update / remove in a scratch home folder.
+    if(UNIX AND NOT APPLE)
+        juce_add_console_app(lowchug-installer-tests PRODUCT_NAME "lowchug-installer-tests")
+        target_sources(lowchug-installer-tests PRIVATE
+            InstallerTests.cpp
+            ${PROJECT_SOURCE_DIR}/tools/installer/Installation.cpp)
+        target_compile_definitions(lowchug-installer-tests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+        target_link_libraries(lowchug-installer-tests PRIVATE
+            juce::juce_core
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+        add_test(NAME installer COMMAND lowchug-installer-tests)
+    endif()
 endif()

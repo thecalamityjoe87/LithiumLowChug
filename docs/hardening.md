@@ -1,6 +1,6 @@
 # Hardening (milestone 5)
 
-Validation, CPU profiling and test coverage for Lithium LowChug, and the bugs they found. The manual host checks are in [host-checklist.md](host-checklist.md).
+Validation, CPU profiling and test coverage for Lithium LowChug, and the bugs they found. The manual host checks are in [host-checklist.md](host-checklist.md). They were run in Lithium Studio on the milestone 5 build and passed: Live/Studio switches with their latency, session save and reload, and automation of Mode, Formant and Tight. A listening check through the TONE3000 amp sim also sounded fine.
 
 ## Validation
 
@@ -129,7 +129,7 @@ The original brief's Testing list isn't in the repository, so this audit maps th
 | Memory safety | CheckedDspTests (**new**, every build); the ASan and ASan/UBSan builds below |
 | Hostile input: NaN, infinity, DC, full-scale noise, denormals | CheckedDspTests (**new**) |
 | CPU | DspTests prints CPU; the profiler (**new**) |
-| Host behavior | pluginval, the VST3 validator, and [host-checklist.md](host-checklist.md) (by hand) |
+| Host behavior | pluginval, the VST3 validator, and [host-checklist.md](host-checklist.md) (by hand; passed in Lithium Studio) |
 
 New in milestone 5 (in bold above): the state restore test (bug 1), the NaN checks (bug 2), the Formant, Bypass and Mix click tests (bug 3), and CheckedDspTests.
 

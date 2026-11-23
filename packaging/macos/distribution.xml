@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The macOS Installer's pages and choices. build-pkg.sh replaces @VERSION@.
+     "Customize" on the Installation Type page shows the choices below. -->
+<installer-gui-script minSpecVersion="2">
+    <title>Lithium LowChug @VERSION@</title>
+    <organization>io.github.thecalamityjoe87</organization>
+    <domains enable_localSystem="true"/>
+    <options customize="allow" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <os-version min="11.0"/>
+
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <license file="LICENSE.txt" mime-type="text/plain"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <background file="background.png" mime-type="image/png" alignment="bottomleft" scaling="none"/>
+    <background-darkAqua file="background.png" mime-type="image/png" alignment="bottomleft" scaling="none"/>
+
+    <choices-outline>
+        <line choice="app"/>
+        <line choice="vst3"/>
+        <line choice="lv2"/>
+        <line choice="au"/>
+        <line choice="docs"/>
+    </choices-outline>
+
+    <choice id="app" title="Standalone app"
+            description="Lithium LowChug on its own, in Applications. No DAW needed: plug in your guitar and play.">
+        <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.app"/>
+    </choice>
+    <choice id="vst3" title="VST3 plugin"
+            description="For Cubase, Reaper, Studio One, Ableton Live, Bitwig and most other DAWs. Installs to /Library/Audio/Plug-Ins/VST3.">
+        <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.vst3"/>
+    </choice>
+    <choice id="lv2" title="LV2 plugin"
+            description="For Reaper, Ardour, Carla and other LV2 hosts. Installs to /Library/Audio/Plug-Ins/LV2.">
+        <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.lv2"/>
+    </choice>
+    <choice id="au" title="Audio Unit plugin"
+            description="For Logic Pro, GarageBand and MainStage. Installs to /Library/Audio/Plug-Ins/Components.">
+        <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.au"/>
+    </choice>
+    <choice id="docs" title="License and notices" enabled="false"
+            description="The license and the third-party notices, in /Library/Application Support/Lithium LowChug. Always installed.">
+        <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.docs"/>
+    </choice>
+
+    <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.app">app.pkg</pkg-ref>
+    <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.vst3">vst3.pkg</pkg-ref>
+    <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.lv2">lv2.pkg</pkg-ref>
+    <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.au">au.pkg</pkg-ref>
+    <pkg-ref id="io.github.thecalamityjoe87.lithiumlowchug.docs">docs.pkg</pkg-ref>
+</installer-gui-script>

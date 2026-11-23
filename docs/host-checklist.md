@@ -2,6 +2,8 @@
 
 A manual check of Lithium LowChug in a real host, to run after each release build. Lithium Studio (`~/.local/bin/lithium-studio`) is built on Tracktion Engine. Tracktion restarts playback when a plugin reports a new latency, so a short restart when you switch modes is expected and correct.
 
+**Last run: 2026-11-22, milestone 5 build. Passed:** mode switches with latency, session save and reload, and automation of Mode, Formant and Tight, plus a listening check through the TONE3000 amp sim.
+
 Automated checks that already pass (milestone 5): pluginval at strictness 10 for the VST3 and the LV2, the Steinberg VST3 validator (537 of 537), and the unit tests. This list covers what only a real host can show.
 
 ## Before you start
