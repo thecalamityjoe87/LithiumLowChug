@@ -28,8 +28,8 @@ MainView::MainView (LowChugProcessor& p)
       header (p),
       tuning (controller),
       readout (p, controller),
-      shiftKnob (p.getState(), params::shift, "Shift", 0.0f),
       fineKnob (p.getState(), params::fine, "Fine", 0.0f),
+      tightKnob (p.getState(), params::tight, "Tight"),
       mixKnob (p.getState(), params::mix, "Mix"),
       outputKnob (p.getState(), params::output, "Output", 0.0f),
       modeAttachment (param (p, params::mode), [this] (float value)
@@ -39,10 +39,10 @@ MainView::MainView (LowChugProcessor& p)
               modeButtons[(size_t) i].setToggleState (juce::roundToInt (value) == i, juce::dontSendNotification);
       }),
       formantAttachment (p.getState(), params::formant, formantButton),
-      tightKnob (p.getState(), params::tight, "Tight", std::nullopt, size::knobSmall),
       controlsHelp ("Controls", {
-          "Shift: the shift in semitones. It follows the dial; turning it by hand sets your own shift (Custom).",
           "Fine: nudges the pitch up or down by up to 50 cents, to match a band tuned slightly off.",
+          "Tight: a gentle low cut that follows the shift: the lower you go, the lower it sits. Turn it up when big "
+          "drops get muddy.",
           "Mix: how much of the shifted guitar you hear. 100 % is shifted only; lower blends in your guitar as played.",
           "Output: the output level. Double-click any knob to reset it." }),
       qualityHelp ("Quality", {
@@ -51,34 +51,27 @@ MainView::MainView (LowChugProcessor& p)
           "crossfades after a moment.",
           "Formant: keeps the tone of your guitar (its body and pickup resonances) where it was while the pitch goes "
           "down, so it sounds like your guitar tuned lower rather than darker and boomier. Off is the classic pitch "
-          "pedal sound.",
-          "Tight: a gentle low cut that follows the shift: the lower you go, the lower it sits. Turn it up when big "
-          "drops get muddy." })
+          "pedal sound." })
 {
     addAndMakeVisible (header);
     addAndMakeVisible (tuning);
     addAndMakeVisible (readout);
 
-    for (auto* knob : { &shiftKnob, &fineKnob, &mixKnob, &outputKnob })
+    for (auto* knob : { &fineKnob, &tightKnob, &mixKnob, &outputKnob })
         addAndMakeVisible (*knob);
 
-    shiftKnob.getSlider().setTooltip ("Shift by hand, in semitones. Moving it switches Hear to Custom.");
     fineKnob.getSlider().setTooltip ("Fine tuning, in cents (hundredths of a semitone).");
+    tightKnob.getSlider().setTooltip ("Tight: a gentle low cut that follows the shift, for big drops that get muddy.");
     mixKnob.getSlider().setTooltip ("How much of the shifted guitar you hear. 100 % is fully shifted.");
     outputKnob.getSlider().setTooltip ("Output level.");
 
     // The parameter sync. Whenever source, target, shift or fine change
-    // (from anywhere), both cards redraw from the parameters...
+    // (from anywhere), both cards redraw from the parameters.
     controller.onChange = [this]
     {
         tuning.refresh();
         readout.repaint();
     };
-
-    // ...and when the USER turns Shift, Hear becomes Custom. UserSlider tells
-    // a hand-made change from the knob merely following its parameter, so
-    // automation or a Hear click moving the knob never triggers this.
-    shiftKnob.getSlider().onUserChange = [this] { controller.shiftMovedByHand(); };
 
     // Quality. The two mode segments drive one choice parameter through a
     // ParameterAttachment: a click writes it as a complete gesture (so the
@@ -108,9 +101,6 @@ MainView::MainView (LowChugProcessor& p)
     formantButton.setColour (juce::TextButton::textColourOffId, colors::text);
     formantButton.setTooltip ("Formant: keep your guitar's own tone while the pitch drops. Off: the classic pedal sound.");
     addAndMakeVisible (formantButton);
-
-    tightKnob.getSlider().setTooltip ("Tight: a gentle low cut that follows the shift, for big drops that get muddy.");
-    addAndMakeVisible (tightKnob);
 
     addAndMakeVisible (controlsHelp);
     addAndMakeVisible (qualityHelp);
@@ -153,9 +143,10 @@ void MainView::resized()
     controlsHelp.setBounds (helpAt (getKnobsCard()));
     qualityHelp.setBounds (helpAt (getQualityCard()));
 
-    // The four knobs, spread evenly across their card.
-    const auto knobs = getKnobsCard();
-    LabeledKnob* row[] = { &shiftKnob, &fineKnob, &mixKnob, &outputKnob };
+    // The four knobs, spread evenly across their card, pulled in a little at
+    // both ends so Output keeps clear of the card's "?".
+    const auto knobs = getKnobsCard().reduced (space::lg, 0);
+    LabeledKnob* row[] = { &fineKnob, &tightKnob, &mixKnob, &outputKnob };
     for (int i = 0; i < 4; ++i)
     {
         auto* knob = row[i];
@@ -164,12 +155,10 @@ void MainView::resized()
         knob->setBounds (size.withCentre ({ centerX, knobs.getCentreY() }));
     }
 
-    // Quality: Mode and Formant on the left, Tight on the right.
-    const auto quality = getQualityCard().reduced (space::lg, space::md);
-    const auto tightSize = tightKnob.getPreferredSize();
-    tightKnob.setBounds (tightSize.withPosition (quality.getRight() - tightSize.getWidth(), quality.getY() + 24));
-
-    auto column = quality.withTrimmedTop (32).withRight (tightKnob.getX() - space::md);
+    // Quality: Mode, then Formant, across the card, centered under the caption.
+    constexpr int qualityHeight = 30 + space::sm + 28;
+    const auto below = getQualityCard().reduced (space::lg, space::md).withTrimmedTop (16);
+    auto column = below.withSizeKeepingCentre (below.getWidth(), qualityHeight);
     auto modeSlot = column.removeFromTop (30).reduced (2);
     modeButtons[0].setBounds (modeSlot.removeFromLeft (modeSlot.getWidth() / 2 - 1));
     modeSlot.removeFromLeft (2);

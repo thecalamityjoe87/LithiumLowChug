@@ -78,7 +78,6 @@ namespace space
 namespace size
 {
     inline constexpr int knob = 56;          // the four main knobs' dials
-    inline constexpr int knobSmall = 40;     // Tight (coming soon)
     inline constexpr int focusRing = 2;      // the keyboard-focus outline
 }
 

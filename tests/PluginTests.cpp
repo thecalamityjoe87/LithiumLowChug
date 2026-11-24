@@ -635,7 +635,7 @@ public:
             playChord (p, 0.1);
         }
 
-        beginTest ("Picking a Hear target moves the Shift knob to it");
+        beginTest ("Picking a Hear target sets the shift parameter to it");
         {
             LowChugProcessor p;
             auto editor = std::make_unique<LowChugEditor> (p);
@@ -643,23 +643,21 @@ public:
             controller.pickTarget (TuningsTests::indexOf ("B Standard"));
             expectEquals (juce::roundToInt (plain (p, params::targetTuning)), TuningsTests::indexOf ("B Standard"));
             expectWithinAbsoluteError (plain (p, params::shift), -5.0f, 1.0e-4f);
-            expectWithinAbsoluteError (editor->getMainView().getShiftSlider().getValue(), -5.0, 1.0e-4);
         }
 
-        beginTest ("Turning Shift by hand sets Hear to Custom; the knob following its parameter does not");
+        beginTest ("Picking a shift sets Hear to Custom; automation moving Shift does not");
         {
             LowChugProcessor p;
             auto editor = std::make_unique<LowChugEditor> (p);
-            auto& slider = editor->getMainView().getShiftSlider();
+            auto& controller = editor->getMainView().getTuningController();
 
             // Automation (or a preset) moves the parameter: Hear stays put.
             auto* shift = p.getState().getParameter (params::shift);
             shift->setValueNotifyingHost (shift->convertTo0to1 (-4.0f));
-            expectWithinAbsoluteError (slider.getValue(), -4.0, 1.0e-4);
             expectEquals (juce::roundToInt (plain (p, params::targetTuning)), tunings::defaultTargetIndex);
 
-            // The user presses an arrow key on the knob: Hear becomes Custom.
-            static_cast<juce::Component&> (slider).keyPressed (juce::KeyPress (juce::KeyPress::downKey));
+            // The user picks a shift (the dial, playing in Custom): Hear becomes Custom.
+            controller.pickShift (-5);
             expectWithinAbsoluteError (plain (p, params::shift), -5.0f, 1.0e-4f);
             expectEquals (juce::roundToInt (plain (p, params::targetTuning)), tunings::customTargetIndex);
             expectEquals (p.getShiftSemitones(), -5);
@@ -680,7 +678,7 @@ public:
             expectEquals (p.getShiftSemitones(), -2);
         }
 
-        beginTest ("The dial offers only reachable tunings, steps lower, and snaps out of Custom");
+        beginTest ("The dial offers only reachable tunings, steps lower, snaps out of Custom, and counts semitones playing in Custom");
         {
             LowChugProcessor p;
             auto editor = std::make_unique<LowChugEditor> (p);
@@ -701,17 +699,48 @@ public:
             expectEquals (dial.getDetents().front(), TuningsTests::indexOf ("Drop D"));
             expectEquals (juce::roundToInt (plain (p, params::targetTuning)), TuningsTests::indexOf ("Drop B")); // still -3
 
-            // Shift by hand to -6 (Custom); the next step lands on the nearest tuning, Drop Ab.
-            static_cast<juce::Component&> (view.getShiftSlider()).keyPressed (juce::KeyPress (juce::KeyPress::downKey));
-            static_cast<juce::Component&> (view.getShiftSlider()).keyPressed (juce::KeyPress (juce::KeyPress::downKey));
-            static_cast<juce::Component&> (view.getShiftSlider()).keyPressed (juce::KeyPress (juce::KeyPress::downKey));
-            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), tunings::customTargetIndex);
+            // Hear Custom at -6 (automation, or an older session); the next step
+            // lands on the nearest tuning, Drop Ab.
+            auto* target = p.getState().getParameter (params::targetTuning);
+            target->setValueNotifyingHost (target->convertTo0to1 ((float) tunings::customTargetIndex));
+            auto* shift = p.getState().getParameter (params::shift);
+            shift->setValueNotifyingHost (shift->convertTo0to1 (-6.0f));
+            expectEquals (dial.getDetents().front(), TuningsTests::indexOf ("Drop D"));
             dial.step (1);
             expectEquals (juce::roundToInt (plain (p, params::targetTuning)), TuningsTests::indexOf ("Drop Ab"));
 
-            // Playing in Custom: no notches at all.
-            view.getTuningController().pickSource (tunings::Source::custom);
+            // Playing in Custom: no named tunings; the dial counts +2 ... -12.
+            view.getTuningController().pickSource (tunings::Source::custom); // keeps -6 (Drop Ab)
             expect (dial.getDetents().empty());
+            expect (dial.countsSemitones());
+            expectEquals (dial.getNumNotches(), 15);
+            expectEquals (p.getShiftSemitones(), -6);
+
+            dial.step (1); // -6 -> -7: sets the shift, Hear stays Custom
+            expectEquals (p.getShiftSemitones(), -7);
+            expectEquals (dial.getShownNotch(), TuningDial::notchOfShift (-7), "the dial shows the new shift, not the old");
+            saveSnapshot (*editor, "lowchug-custom-2x", 2.0f);
+            expectWithinAbsoluteError (plain (p, params::shift), -7.0f, 1.0e-4f);
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), tunings::customTargetIndex);
+
+            dial.step (-20); // clamps at +2
+            expectEquals (p.getShiftSemitones(), 2);
+            dial.step (20); // clamps at an octave down
+            expectEquals (p.getShiftSemitones(), -12);
+
+            // Back to Standard: a shift with a name lands on it...
+            dial.step (-10); // -2
+            view.getTuningController().pickSource (tunings::Source::standard);
+            expect (! dial.countsSemitones());
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), TuningsTests::indexOf ("D Standard"));
+            expectEquals (p.getShiftSemitones(), -2);
+
+            // ...and one without stays Custom, still sounding the same.
+            view.getTuningController().pickSource (tunings::Source::custom);
+            view.getTuningController().pickShift (1);
+            view.getTuningController().pickSource (tunings::Source::standard);
+            expectEquals (juce::roundToInt (plain (p, params::targetTuning)), tunings::customTargetIndex);
+            expectEquals (p.getShiftSemitones(), 1);
         }
 
         beginTest ("The preset box steps through presets and marks edits");

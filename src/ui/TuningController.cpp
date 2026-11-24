@@ -21,8 +21,7 @@ float plainValue (const juce::RangedAudioParameter& p)
 } // namespace
 
 TuningController::TuningController (LowChugProcessor& p)
-    : processor (p),
-      sourceParam (param (p, params::sourceTuning)),
+    : sourceParam (param (p, params::sourceTuning)),
       targetParam (param (p, params::targetTuning)),
       shiftParam (param (p, params::shift)),
       fineParam (param (p, params::fine)),
@@ -60,7 +59,12 @@ int TuningController::getDisplayedTarget() const
 
 int TuningController::getShiftSemitones() const
 {
-    return processor.getShiftSemitones();
+    // The same rule as LowChugProcessor::getShiftSemitones(), but read from
+    // the parameter objects, not the processor's raw values. JUCE tells a
+    // parameter's newest listener first, so while our attachments' callbacks
+    // run, the raw values (updated by an older listener) can still hold the
+    // previous value; the parameter's own value is always current.
+    return tunings::shiftFor (getSource(), getTarget()).value_or (juce::roundToInt (plainValue (shiftParam)));
 }
 
 float TuningController::getFineCents() const
@@ -71,32 +75,32 @@ float TuningController::getFineCents() const
 void TuningController::pickSource (tunings::Source newSource)
 {
     const int heard = getShiftSemitones();
-    const bool wasCustom = getTarget() == tunings::customTargetIndex;
 
-    // 1. Park the current shift on the knob, so whatever Hear becomes, the
-    //    sound doesn't jump.
+    // 1. Park the current shift in the shift parameter, so whatever Hear
+    //    becomes, the sound doesn't jump.
     shift.setValueAsCompleteGesture ((float) heard);
 
     // 2. The new source.
     source.setValueAsCompleteGesture ((float) static_cast<int> (newSource));
 
     // 3. The matching target: the same shift in the new family (D Standard
-    //    -> Drop C), or Custom if there is none. A Custom target stays Custom.
-    if (! wasCustom)
-        target.setValueAsCompleteGesture ((float) tunings::targetForShift (newSource, heard));
+    //    -> Drop C, or -2 from Custom -> D Standard), or Custom if there is
+    //    none (always so when playing in Custom).
+    target.setValueAsCompleteGesture ((float) tunings::targetForShift (newSource, heard));
 }
 
 void TuningController::pickTarget (int targetIndex)
 {
-    // Custom keeps whatever the knob says; a named target also moves the
-    // knob to its shift, so the knob shows what you hear.
+    // Custom keeps the shift as it is; a named target also sets the shift
+    // to its own, so the shift parameter says what you hear.
     const auto heard = getShiftSemitones();
     target.setValueAsCompleteGesture ((float) targetIndex);
     shift.setValueAsCompleteGesture ((float) tunings::shiftFor (getSource(), targetIndex).value_or (heard));
 }
 
-void TuningController::shiftMovedByHand()
+void TuningController::pickShift (int semitones)
 {
+    shift.setValueAsCompleteGesture ((float) semitones);
     if (getTarget() != tunings::customTargetIndex)
         target.setValueAsCompleteGesture ((float) tunings::customTargetIndex);
 }

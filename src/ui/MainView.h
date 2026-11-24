@@ -25,9 +25,9 @@ namespace lowchug
         |       [B] [Bb] [A] [Oct] [Cust] | spectrum + string markers |
         |                                 | * On target  -2.00 st 0 ct|
         +---------------------------------+---------------------------+
-        |  SHIFT   FINE   MIX   OUTPUT    | QUALITY                   |
-        |   (o)    (o)    (o)    (o)      | [LIVE|STUDIO]  TIGHT (o)  |
-        |                                 | [  FORMANT  ]             |
+        |  FINE   TIGHT   MIX   OUTPUT    | QUALITY                   |
+        |   (o)    (o)    (o)    (o)      | [   LIVE   |   STUDIO   ] |
+        |                                 | [        FORMANT        ] |
         +---------------------------------+---------------------------+
 */
 class MainView final : public juce::Component
@@ -43,7 +43,6 @@ public:
     TuningPanel& getTuningPanel() noexcept { return tuning; }
     HeaderBar& getHeader() noexcept { return header; }
     ReadoutPanel& getReadoutPanel() noexcept { return readout; }
-    UserSlider& getShiftSlider() noexcept { return shiftKnob.getSlider(); }
     juce::TextButton& getModeButton (int index) noexcept { return modeButtons[(size_t) index]; }
     juce::TextButton& getFormantButton() noexcept { return formantButton; }
     LabeledKnob& getTightKnob() noexcept { return tightKnob; }
@@ -64,15 +63,16 @@ private:
     TuningPanel tuning;
     ReadoutPanel readout;
 
-    LabeledKnob shiftKnob, fineKnob, mixKnob, outputKnob;
+    // The knobs you adjust by ear. (The shift itself is set on the tuning
+    // dial; its parameter has no knob of its own.)
+    LabeledKnob fineKnob, tightKnob, mixKnob, outputKnob;
 
-    // Quality: Live / Studio (two segments driving one choice parameter),
-    // Formant (a toggle) and Tight (a small knob).
+    // Quality: Live / Studio (two segments driving one choice parameter)
+    // and Formant (a toggle): how the shift is done, set once per session.
     std::array<juce::TextButton, 2> modeButtons;
     juce::ParameterAttachment modeAttachment;
     juce::TextButton formantButton { "Formant" };
     juce::AudioProcessorValueTreeState::ButtonAttachment formantAttachment;
-    LabeledKnob tightKnob;
 
     // The "?" in the two lower cards (the upper cards have their own).
     HelpButton controlsHelp, qualityHelp;

@@ -76,7 +76,7 @@ public:
     juce::AudioProcessorValueTreeState& getState() { return state; }
 
     /** The whole-semitone shift the parameters currently ask for: the Hear
-        target's shift, or the Shift knob when Hear (or Playing in) is
+        target's shift, or the shift parameter when Hear (or Playing in) is
         Custom. Reads atomics only, so it is safe on any thread. */
     int getShiftSemitones() const;
 

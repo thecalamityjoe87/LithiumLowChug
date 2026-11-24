@@ -4,9 +4,9 @@
 
 **A free, open-source guitar detuner.** Play in standard (or Drop D) and hear your guitar tuned lower: E♭ standard, D standard, Drop C, B standard, an octave down. Chords included, and tight enough to play through live.
 
-![The editor: the tuning you play in and the tuning you hear, the YOU HEAR card with the input and output spectra, and the Shift, Fine, Mix and Output knobs](docs/images/editor.png)
+![The editor: the tuning you play in and the tuning you hear, the YOU HEAR card with the input and output spectra, and the Fine, Tight, Mix and Output knobs](docs/images/editor.png)
 
-VST3, LV2, AU and a standalone app · Linux, Windows and macOS · Version 0.5.0 · Free software, [GNU AGPLv3](LICENSE)
+VST3, LV2, AU and a standalone app · Linux, Windows and macOS · Version 0.6.0 · Free software, [GNU AGPLv3](LICENSE)
 
 By Isaac Joseph ([Calamity Audio](https://github.com/thecalamityjoe87)). Part of the Lithium family, with Lithium Drums and Lithium Studio.
 
@@ -22,7 +22,7 @@ It's early software. Everything below works and has been checked in a host, but 
 
 ### Pick your tuning
 
-Tell LowChug how your guitar is tuned with the Playing in buttons (Standard, Drop D or Custom), then turn the "Tune down to" dial to the tuning you want to hear. The dial's notches are the tunings reachable from yours: from standard, E♭ standard down to A standard and an octave down; from Drop D, Drop C# down to Drop G and an octave down. Custom sets the shift by hand with the Shift and Fine knobs. Each card has a "?" that explains it.
+Tell LowChug how your guitar is tuned with the Playing in buttons (Standard, Drop D or Custom), then turn the "Tune down to" dial to the tuning you want to hear. The dial's notches are the tunings reachable from yours: from standard, E♭ standard down to A standard and an octave down; from Drop D, Drop C# down to Drop G and an octave down. Playing in Custom (say, a guitar tuned to Drop C, or an open tuning), the dial counts semitones instead, from +2 through 0 down to -12, and Fine trims anything in between. Each card has a "?" that explains it.
 
 ### Live and Studio
 
@@ -128,7 +128,7 @@ Each system gets a graphical installer, the same as Lithium Drums', that shows t
 
 `scripts/package.sh release dist` builds the release preset and writes the package to `dist/`. Running the Linux installer again offers Update and Remove; Remove deletes only what it installed (it keeps a list in `~/.local/lib/lithium-lowchug/install.json`). It also runs from a terminal: `./"Install Lithium LowChug" --install [standalone,vst3,lv2]` (or `--remove`). `LITHIUM_INSTALLER_PAYLOAD=<folder>` makes it install from another payload folder, for testing.
 
-`.github/workflows/release.yml` builds all three on GitHub's machines: run it from the Actions tab (Release › Run workflow) to get the packages as the run's artifacts, or push a version tag (`v0.5.0`) to also get a draft release with them attached. The Linux build runs on Ubuntu 22.04, so it works with older glibc versions; the macOS build is universal (arm64 and x86_64, macOS 11 or later). Unsigned, Windows shows a SmartScreen warning and macOS an "unidentified developer" one; the workflow's comments list the secrets that turn on macOS signing and notarization (an Apple Developer account).
+`.github/workflows/release.yml` builds all three on GitHub's machines: run it from the Actions tab (Release › Run workflow) to get the packages as the run's artifacts, or push a version tag (`v0.6.0`) to also get a draft release with them attached. The Linux build runs on Ubuntu 22.04, so it works with older glibc versions; the macOS build is universal (arm64 and x86_64, macOS 11 or later). Unsigned, Windows shows a SmartScreen warning and macOS an "unidentified developer" one; the workflow's comments list the secrets that turn on macOS signing and notarization (an Apple Developer account).
 
 The icon and the installers' artwork (`assets/icon/`) are drawn from the logo code (`src/ui/Logo.cpp`: a guitar pick with a flat sign cut out of it); after changing it, run `scripts/make-icons.sh` (needs ImageMagick 7).
 

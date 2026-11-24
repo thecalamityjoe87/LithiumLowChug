@@ -125,7 +125,7 @@ The original brief's Testing list isn't in the repository, so this audit maps th
 | Tunings, presets, programs | PluginTests: tunings, 18 programs, Studio presets select Studio |
 | State | PluginTests: round trip, garbage ignored, **every parameter restored after in-between host values** |
 | Threading | PluginTests: program changes and mode latency from other threads |
-| Editor | PluginTests: opens and closes without leaking, Quality controls, preset box and panel, dial, Shift knob |
+| Editor | PluginTests: opens and closes without leaking, Quality controls, preset box and panel, dial (named tunings and Custom shifts) |
 | Memory safety | CheckedDspTests (**new**, every build); the ASan and ASan/UBSan builds below |
 | Hostile input: NaN, infinity, DC, full-scale noise, denormals | CheckedDspTests (**new**) |
 | CPU | DspTests prints CPU; the profiler (**new**) |

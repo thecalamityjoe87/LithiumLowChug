@@ -13,8 +13,8 @@ namespace lowchug
 
     A slider's value also changes when its parameter changes elsewhere
     (automation, a preset, another control): the attachment then sets the
-    slider to match. The Shift knob must tell the two apart, because only a
-    hand-made change should switch Hear to Custom.
+    slider to match. onUserChange fires only for the hand-made changes, for
+    controls that must react to the user but not to their own parameter.
 
     JUCE wraps every user interaction (drag, mouse wheel, double-click
     reset, accessibility) in startedDragging() / stoppedDragging(). Arrow keys

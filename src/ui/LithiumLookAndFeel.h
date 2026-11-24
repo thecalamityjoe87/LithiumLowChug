@@ -39,7 +39,7 @@ struct EmbeddedFonts
     Extra per-widget options are passed as component properties (a small
     key/value map every Component has), so no custom widget classes are needed:
       - Slider "origin" (a value in the slider's range): where the value arc
-        starts, e.g. 0 st on the Shift knob, 0 dB on Output. Default: the
+        starts, e.g. 0 ct on Fine, 0 dB on Output. Default: the
         start of the range.
       - Button "segment" = true: draws as one segment of a segmented control
         (no outline, transparent when off, accent when on).

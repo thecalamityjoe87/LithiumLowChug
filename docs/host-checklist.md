@@ -48,10 +48,10 @@ Open the host's program/preset menu for the plugin (not the plugin's own preset 
   | 9 | Octave Down (Live) | Standard | −12 st | 18 | Octave Down (Studio) |
 
 - [ ] A fresh instance starts on **D Standard (Live)**.
-- [ ] Picking a program from the host menu updates the editor: the preset box name, Playing in, the "Tune down to" dial, the Shift knob, and Live/Studio.
+- [ ] Picking a program from the host menu updates the editor: the preset box name, Playing in, the "Tune down to" dial, and Live/Studio.
 - [ ] Picking a program from the plugin's own preset box shows the same name in the host's menu.
 - [ ] Every program sets Formant off, Tight 0 %, Mix 100 % and Output 0 dB.
-- [ ] Turning any covered control (Shift, Fine, Formant, Tight, Mix, Output, mode) adds a `*` to the preset box name.
+- [ ] Changing any covered control (the dial, Fine, Formant, Tight, Mix, Output, mode) adds a `*` to the preset box name.
 
 ## 3. Latency on mode switches
 
@@ -61,7 +61,7 @@ At 48 kHz, Live is **1024 samples (21.3 ms)** and Studio is **2304 samples (48.0
 - [ ] Click **Studio** while stopped, then **Live**: the readout follows each time.
 - [ ] Click **Studio** during playback. You may hear one short playback restart (Tracktion re-syncs), then the shifted sound continues with no click or dropout. Do the same back to **Live**.
 - [ ] Switch with a program: pick **B Standard (Studio)**, then **B Standard (Live)** from the host menu. The latency follows, as with the buttons.
-- [ ] **Compensation is right.** Duplicate the DI track, and on the copy set LowChug to **Hear: Custom**, **Shift 0**, **Fine 0**. At 0 st the plugin passes the signal through, delayed by exactly its latency. Play both tracks:
+- [ ] **Compensation is right.** Duplicate the DI track, and on the copy set LowChug to **Playing in: Custom**, the dial on **0**, **Fine 0**. At 0 st the plugin passes the signal through, delayed by exactly its latency. Play both tracks:
   - [ ] With a polarity/phase invert on one track (if Lithium Studio has one), the pair cancels to silence in both Live and Studio.
   - [ ] Without one: solo both and listen for flamming or a doubled attack (there should be none), or export both tracks and check that the pick transients line up to the sample.
 - [ ] With the copy shifted (e.g. Drop C), its pick attacks still land on the beat with the original, not 21 or 48 ms late.
